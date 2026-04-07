@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/nskut/smoko/internal/assertions"
 )
@@ -25,6 +26,7 @@ type Reporter struct {
 	w        io.Writer
 	verbose  bool
 	color    bool
+	mu       sync.Mutex
 	reports  []ScenarioReport
 }
 
@@ -35,7 +37,11 @@ func New(w io.Writer, verbose bool) *Reporter {
 }
 
 // Add records a scenario result and immediately prints the one-line status.
+// Safe for concurrent use.
 func (r *Reporter) Add(rep ScenarioReport) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	r.reports = append(r.reports, rep)
 
 	if rep.Error != nil {

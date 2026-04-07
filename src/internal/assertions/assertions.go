@@ -6,11 +6,28 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/nskut/smoko/internal/docker"
 	"github.com/nskut/smoko/internal/executor"
 	"github.com/nskut/smoko/internal/parser"
 )
+
+// regexCache caches compiled user-provided regex patterns.
+var regexCache sync.Map // string → *regexp.Regexp
+
+// compileRegex compiles a regex pattern, returning a cached version if available.
+func compileRegex(pattern string) (*regexp.Regexp, error) {
+	if cached, ok := regexCache.Load(pattern); ok {
+		return cached.(*regexp.Regexp), nil
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	regexCache.Store(pattern, re)
+	return re, nil
+}
 
 // Result is the outcome of a single assertion.
 type Result struct {
@@ -21,6 +38,146 @@ type Result struct {
 func pass() Result { return Result{Pass: true} }
 func fail(format string, args ...interface{}) Result {
 	return Result{Pass: false, Message: fmt.Sprintf(format, args...)}
+}
+
+// EvaluateAll evaluates all Then steps, batching filesystem checks into a single
+// docker exec for performance. Steps that don't require filesystem access are
+// evaluated locally.
+func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResult, dc *docker.Client, containerID string) []Result {
+	results := make([]Result, len(steps))
+
+	// First pass: identify which steps need filesystem checks and collect them
+	type fsNeed struct {
+		stepIdx int
+		checks  []docker.FSCheck
+	}
+
+	var allChecks []docker.FSCheck
+	type checkRef struct {
+		stepIdx    int
+		globalIdx  int
+		checkKind  string // "file-exists", "dir-exists", "file-contains", "file-contains-block"
+		path       string
+		needle     string
+		negate     bool
+	}
+	var refs []checkRef
+
+	for i, step := range steps {
+		if step.ResolvedType != parser.StepThen {
+			continue
+		}
+		text := step.Text
+
+		// file exists / does not exist
+		if m := reFileExists.FindStringSubmatch(text); m != nil {
+			negate := strings.Contains(text, "does not exist")
+			path := unescapeString(m[1])
+			refs = append(refs, checkRef{stepIdx: i, globalIdx: len(allChecks), checkKind: "file-exists", path: path, negate: negate})
+			allChecks = append(allChecks, docker.FSCheck{Kind: docker.FSCheckFileExists, Path: path})
+			continue
+		}
+
+		// directory exists / does not exist
+		if m := reDirExists.FindStringSubmatch(text); m != nil {
+			negate := strings.Contains(text, "does not exist")
+			path := unescapeString(m[1])
+			refs = append(refs, checkRef{stepIdx: i, globalIdx: len(allChecks), checkKind: "dir-exists", path: path, negate: negate})
+			allChecks = append(allChecks, docker.FSCheck{Kind: docker.FSCheckDirExists, Path: path})
+			continue
+		}
+
+		// file contains block form
+		if m := reFileContainsBlock.FindStringSubmatch(text); m != nil {
+			negate := strings.Contains(text, "does not contain")
+			path := unescapeString(m[1])
+			refs = append(refs, checkRef{stepIdx: i, globalIdx: len(allChecks), checkKind: "file-contains-block", path: path, needle: step.Block, negate: negate})
+			allChecks = append(allChecks, docker.FSCheck{Kind: docker.FSCheckReadFile, Path: path})
+			continue
+		}
+
+		// file contains inline form
+		if m := reFileContains.FindStringSubmatch(text); m != nil {
+			negate := strings.Contains(text, "does not contain")
+			path := unescapeString(m[1])
+			needle := unescapeString(m[2])
+			refs = append(refs, checkRef{stepIdx: i, globalIdx: len(allChecks), checkKind: "file-contains", path: path, needle: needle, negate: negate})
+			allChecks = append(allChecks, docker.FSCheck{Kind: docker.FSCheckReadFile, Path: path})
+			continue
+		}
+	}
+
+	// Execute batched filesystem checks
+	var fsResults []docker.FSResult
+	if len(allChecks) > 0 {
+		var err error
+		fsResults, err = dc.BatchFSCheck(ctx, containerID, allChecks)
+		if err != nil {
+			// Fall back to individual evaluation
+			for i, step := range steps {
+				if step.ResolvedType != parser.StepThen {
+					continue
+				}
+				results[i] = Evaluate(ctx, step, wr, dc, containerID)
+			}
+			return results
+		}
+	}
+
+	// Build a map of step index → fs result for steps that were batched
+	batchedSteps := make(map[int]bool)
+	for _, ref := range refs {
+		batchedSteps[ref.stepIdx] = true
+		fr := fsResults[ref.globalIdx]
+
+		switch ref.checkKind {
+		case "file-exists":
+			if fr.Err != nil {
+				results[ref.stepIdx] = fail("file exists check error: %v", fr.Err)
+			} else if ref.negate && fr.Exists {
+				results[ref.stepIdx] = fail("file %q unexpectedly exists", ref.path)
+			} else if !ref.negate && !fr.Exists {
+				results[ref.stepIdx] = fail("file %q does not exist", ref.path)
+			} else {
+				results[ref.stepIdx] = pass()
+			}
+
+		case "dir-exists":
+			if fr.Err != nil {
+				results[ref.stepIdx] = fail("directory exists check error: %v", fr.Err)
+			} else if ref.negate && fr.Exists {
+				results[ref.stepIdx] = fail("directory %q unexpectedly exists", ref.path)
+			} else if !ref.negate && !fr.Exists {
+				results[ref.stepIdx] = fail("directory %q does not exist", ref.path)
+			} else {
+				results[ref.stepIdx] = pass()
+			}
+
+		case "file-contains-block", "file-contains":
+			if fr.Err != nil {
+				results[ref.stepIdx] = fail("read file %q: %v", ref.path, fr.Err)
+			} else if ref.negate && strings.Contains(fr.Content, ref.needle) {
+				results[ref.stepIdx] = fail("file %q unexpectedly contains %q", ref.path, ref.needle)
+			} else if !ref.negate && !strings.Contains(fr.Content, ref.needle) {
+				results[ref.stepIdx] = fail("file %q does not contain %q\nActual content:\n%s", ref.path, ref.needle, fr.Content)
+			} else {
+				results[ref.stepIdx] = pass()
+			}
+		}
+	}
+
+	// Evaluate non-batched steps individually
+	for i, step := range steps {
+		if step.ResolvedType != parser.StepThen {
+			continue
+		}
+		if batchedSteps[i] {
+			continue
+		}
+		results[i] = Evaluate(ctx, step, wr, dc, containerID)
+	}
+
+	return results
 }
 
 // Evaluate evaluates a Then/And step against the captured WhenResult and
@@ -63,7 +220,7 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 	if m := reOutputMatches.FindStringSubmatch(text); m != nil {
 		negate := strings.Contains(text, "does not match")
 		pattern := unescapeString(m[1])
-		re, err := regexp.Compile(pattern)
+		re, err := compileRegex(pattern)
 		if err != nil {
 			return fail("invalid regex %q: %v", pattern, err)
 		}

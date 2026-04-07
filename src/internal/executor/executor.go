@@ -30,10 +30,74 @@ func WriteEnvFile(ctx context.Context, dc *docker.Client, containerID string, va
 	return dc.WriteFile(ctx, containerID, docker.WorkDir()+"/.smoko_env", sb.String())
 }
 
-// RunGiven executes a Given step against the container.
-// env accumulates environment variables that should be set at container-creation time.
-// (env vars set in Given must be passed before CreateContainer, so they are collected
-// during a pre-scan of Given steps; RunGiven handles file/dir operations only.)
+// RunGivenSteps executes all Given steps against the container, batching file
+// operations into a single tar upload for performance.
+func RunGivenSteps(ctx context.Context, dc *docker.Client, containerID string, steps []parser.Step) error {
+	var files []docker.FileEntry
+	var dirSteps []parser.Step
+
+	for _, step := range steps {
+		if step.ResolvedType != parser.StepGiven {
+			continue
+		}
+		text := step.Text
+
+		// Given a file "X" with content: <block>
+		if m := reFileWithContent.FindStringSubmatch(text); m != nil {
+			files = append(files, docker.FileEntry{
+				Path:    docker.WorkDir() + "/" + m[1],
+				Content: step.Block,
+			})
+			continue
+		}
+
+		// Given a file "X" exists
+		if m := reFileExists.FindStringSubmatch(text); m != nil {
+			files = append(files, docker.FileEntry{
+				Path:    docker.WorkDir() + "/" + m[1],
+				Content: "",
+			})
+			continue
+		}
+
+		// Given the directory "X" exists
+		if m := reDirExists.FindStringSubmatch(text); m != nil {
+			dirSteps = append(dirSteps, step)
+			continue
+		}
+
+		// Given an empty working directory — no-op, container starts clean
+		if reEmptyWorkDir.MatchString(text) {
+			continue
+		}
+
+		// Given environment variable "X" is set to "Y"
+		if reEnvVar.MatchString(text) {
+			continue
+		}
+
+		return fmt.Errorf("unknown Given step: %q", text)
+	}
+
+	// Batch all file writes into a single CopyToContainer
+	if err := dc.WriteFiles(ctx, containerID, files); err != nil {
+		return fmt.Errorf("write files: %w", err)
+	}
+
+	// Directories that need mkdir (not writable via tar alone for empty dirs
+	// that aren't parents of any file)
+	for _, step := range dirSteps {
+		m := reDirExists.FindStringSubmatch(step.Text)
+		if err := dc.MakeDir(ctx, containerID, m[1]); err != nil {
+			return fmt.Errorf("Given %q: %w", step.Text, err)
+		}
+	}
+
+	return nil
+}
+
+// RunGiven executes a single Given step against the container.
+// Prefer RunGivenSteps for batched execution.
 func RunGiven(ctx context.Context, dc *docker.Client, containerID string, step parser.Step) error {
 	text := step.Text
 

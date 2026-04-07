@@ -162,6 +162,7 @@ smoko run test.smoko --image ubuntu:latest --timeout 60 --verbose --fail-fast
 | `--timeout` | 30 | Seconds to wait for each When step |
 | `--verbose` | false | Print stdout/stderr even for passing scenarios |
 | `--fail-fast` | false | Stop after the first failed scenario |
+| `--parallel` | 1 | Number of scenarios to run concurrently (0 = auto) |
 
 ## Project Structure
 

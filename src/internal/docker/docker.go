@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -19,7 +20,8 @@ const workDir = "/smoko-work"
 
 // Client wraps the Docker SDK.
 type Client struct {
-	cli *client.Client
+	cli        *client.Client
+	pulledOnce sync.Map // tracks images already verified as present
 }
 
 // New creates a new Docker client using environment defaults (DOCKER_HOST etc.).
@@ -35,10 +37,15 @@ func New() (*Client, error) {
 func (c *Client) Close() error { return c.cli.Close() }
 
 // PullIfMissing pulls the image if it isn't already present locally.
+// Results are cached: subsequent calls for the same image are no-ops.
 func (c *Client) PullIfMissing(ctx context.Context, imageName string) error {
+	if _, ok := c.pulledOnce.Load(imageName); ok {
+		return nil
+	}
 	// Try to inspect locally first
 	_, _, err := c.cli.ImageInspectWithRaw(ctx, imageName)
 	if err == nil {
+		c.pulledOnce.Store(imageName, true)
 		return nil // already present
 	}
 	rc, err := c.cli.ImagePull(ctx, imageName, image.PullOptions{})
@@ -46,7 +53,11 @@ func (c *Client) PullIfMissing(ctx context.Context, imageName string) error {
 		return fmt.Errorf("docker: pull %s: %w", imageName, err)
 	}
 	_, _ = io.Copy(io.Discard, rc) // consume output so pull completes
-	return rc.Close()
+	if err := rc.Close(); err != nil {
+		return err
+	}
+	c.pulledOnce.Store(imageName, true)
+	return nil
 }
 
 // CreateContainer creates a container with the given image and env vars.
@@ -113,28 +124,56 @@ func (c *Client) ExecCommand(ctx context.Context, containerID, workdir, command 
 	return outBuf.String(), errBuf.String(), inspect.ExitCode, nil
 }
 
+// FileEntry represents a file to write into a container.
+type FileEntry struct {
+	Path    string // absolute path inside the container
+	Content string
+}
+
 // WriteFile copies content into the container at path (creates parent dirs).
 func (c *Client) WriteFile(ctx context.Context, containerID, path, content string) error {
-	// Ensure the parent directory exists
-	dir := parentDir(path)
-	if dir != "" && dir != "." {
-		if _, _, code, err := c.ExecCommand(ctx, containerID, "", "mkdir -p "+ShellQuote(dir), "", 10*time.Second); err != nil || code != 0 {
-			return fmt.Errorf("docker: mkdir %s: %w", dir, err)
-		}
+	return c.WriteFiles(ctx, containerID, []FileEntry{{Path: path, Content: content}})
+}
+
+// WriteFiles copies multiple files into the container in a single tar upload.
+// Parent directories are created automatically via tar directory entries, avoiding
+// individual mkdir exec calls.
+func (c *Client) WriteFiles(ctx context.Context, containerID string, files []FileEntry) error {
+	if len(files) == 0 {
+		return nil
 	}
 
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
-	body := []byte(content)
-	if err := tw.WriteHeader(&tar.Header{
-		Name: path,
-		Mode: 0644,
-		Size: int64(len(body)),
-	}); err != nil {
-		return err
-	}
-	if _, err := tw.Write(body); err != nil {
-		return err
+
+	// Track which directories we've already added to the tar
+	dirs := make(map[string]bool)
+	for _, f := range files {
+		// Ensure all parent directories are represented in the tar
+		parts := strings.Split(strings.TrimPrefix(f.Path, "/"), "/")
+		for i := 1; i < len(parts); i++ {
+			dir := "/" + strings.Join(parts[:i], "/") + "/"
+			if !dirs[dir] {
+				dirs[dir] = true
+				_ = tw.WriteHeader(&tar.Header{
+					Typeflag: tar.TypeDir,
+					Name:     dir,
+					Mode:     0755,
+				})
+			}
+		}
+
+		body := []byte(f.Content)
+		if err := tw.WriteHeader(&tar.Header{
+			Name: f.Path,
+			Mode: 0644,
+			Size: int64(len(body)),
+		}); err != nil {
+			return err
+		}
+		if _, err := tw.Write(body); err != nil {
+			return err
+		}
 	}
 	tw.Close()
 
@@ -192,6 +231,119 @@ func (c *Client) RemoveContainer(ctx context.Context, containerID string) error 
 	return c.cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
 }
 
+// FSCheckKind identifies the type of filesystem check.
+type FSCheckKind int
+
+const (
+	FSCheckFileExists FSCheckKind = iota
+	FSCheckDirExists
+	FSCheckReadFile
+)
+
+// FSCheck describes a single filesystem check to batch.
+type FSCheck struct {
+	Kind FSCheckKind
+	Path string // path (absolute or relative to workdir)
+}
+
+// FSResult holds the result of a single batched filesystem check.
+type FSResult struct {
+	Exists  bool
+	Content string // only populated for FSCheckReadFile
+	Err     error
+}
+
+// BatchFSCheck performs multiple filesystem checks in a single docker exec.
+// Returns results in the same order as the input checks.
+func (c *Client) BatchFSCheck(ctx context.Context, containerID string, checks []FSCheck) ([]FSResult, error) {
+	if len(checks) == 0 {
+		return nil, nil
+	}
+
+	// For a single check, fall back to individual methods for simplicity
+	if len(checks) == 1 {
+		return c.singleFSCheck(ctx, containerID, checks[0])
+	}
+
+	// Build a shell script that outputs structured results.
+	// Protocol: for each check, output a marker line then the result.
+	// Markers: __SMOKO_CHK_<index>_START__ and __SMOKO_CHK_<index>_END__
+	var sb strings.Builder
+	for i, chk := range checks {
+		absPath := absWorkPath(chk.Path)
+		startMarker := fmt.Sprintf("__SMOKO_CHK_%d_START__", i)
+		endMarker := fmt.Sprintf("__SMOKO_CHK_%d_END__", i)
+
+		switch chk.Kind {
+		case FSCheckFileExists:
+			fmt.Fprintf(&sb, "echo %s; test -f %s && echo YES || echo NO; echo %s\n",
+				startMarker, ShellQuote(absPath), endMarker)
+		case FSCheckDirExists:
+			fmt.Fprintf(&sb, "echo %s; test -d %s && echo YES || echo NO; echo %s\n",
+				startMarker, ShellQuote(absPath), endMarker)
+		case FSCheckReadFile:
+			fmt.Fprintf(&sb, "echo %s; cat %s 2>/dev/null && echo '' && echo __SMOKO_CAT_OK__ || echo __SMOKO_CAT_FAIL__; echo %s\n",
+				startMarker, ShellQuote(absPath), endMarker)
+		}
+	}
+
+	stdout, _, _, err := c.ExecCommand(ctx, containerID, "", sb.String(), "", 10*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("docker: batch fs check: %w", err)
+	}
+
+	// Parse results
+	results := make([]FSResult, len(checks))
+	for i, chk := range checks {
+		startMarker := fmt.Sprintf("__SMOKO_CHK_%d_START__", i)
+		endMarker := fmt.Sprintf("__SMOKO_CHK_%d_END__", i)
+
+		startIdx := strings.Index(stdout, startMarker)
+		endIdx := strings.Index(stdout, endMarker)
+		if startIdx < 0 || endIdx < 0 {
+			results[i] = FSResult{Err: fmt.Errorf("missing marker for check %d", i)}
+			continue
+		}
+
+		body := stdout[startIdx+len(startMarker) : endIdx]
+		body = strings.TrimSpace(body)
+
+		switch chk.Kind {
+		case FSCheckFileExists, FSCheckDirExists:
+			results[i] = FSResult{Exists: body == "YES"}
+		case FSCheckReadFile:
+			if strings.HasSuffix(body, "__SMOKO_CAT_FAIL__") {
+				results[i] = FSResult{Err: fmt.Errorf("docker: file %s not found", chk.Path)}
+			} else {
+				content := strings.TrimSuffix(body, "__SMOKO_CAT_OK__")
+				content = strings.TrimRight(content, "\n")
+				results[i] = FSResult{Exists: true, Content: content}
+			}
+		}
+	}
+
+	return results, nil
+}
+
+func (c *Client) singleFSCheck(ctx context.Context, containerID string, chk FSCheck) ([]FSResult, error) {
+	switch chk.Kind {
+	case FSCheckFileExists:
+		exists, err := c.FileExists(ctx, containerID, chk.Path)
+		return []FSResult{{Exists: exists, Err: err}}, nil
+	case FSCheckDirExists:
+		exists, err := c.DirExists(ctx, containerID, chk.Path)
+		return []FSResult{{Exists: exists, Err: err}}, nil
+	case FSCheckReadFile:
+		content, err := c.ReadFile(ctx, containerID, chk.Path)
+		if err != nil {
+			return []FSResult{{Err: err}}, nil
+		}
+		return []FSResult{{Exists: true, Content: content}}, nil
+	default:
+		return []FSResult{{Err: fmt.Errorf("unknown check kind")}}, nil
+	}
+}
+
 // WorkDir returns the working directory used inside containers.
 func WorkDir() string { return workDir }
 
@@ -200,13 +352,6 @@ func absWorkPath(p string) string {
 		return p
 	}
 	return workDir + "/" + p
-}
-
-func parentDir(path string) string {
-	if idx := strings.LastIndex(path, "/"); idx > 0 {
-		return path[:idx]
-	}
-	return ""
 }
 
 // ShellQuote wraps s in single quotes, escaping any existing single quotes.

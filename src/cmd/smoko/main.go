@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -47,13 +50,14 @@ func runCmd() *cobra.Command {
 	var timeout int
 	var verbose bool
 	var failFast bool
+	var parallel int
 
 	cmd := &cobra.Command{
 		Use:   "run <path>",
 		Short: "Run .smoko test files",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTests(args[0], image, timeout, verbose, failFast)
+			return runTests(args[0], image, timeout, verbose, failFast, parallel)
 		},
 	}
 
@@ -61,11 +65,12 @@ func runCmd() *cobra.Command {
 	cmd.Flags().IntVar(&timeout, "timeout", 0, "Seconds to wait for each When step (default: 30)")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Print stdout/stderr even for passing scenarios")
 	cmd.Flags().BoolVar(&failFast, "fail-fast", false, "Stop after the first failed scenario")
+	cmd.Flags().IntVar(&parallel, "parallel", 1, "Number of scenarios to run in parallel (0 = auto)")
 
 	return cmd
 }
 
-func runTests(path, imageFlag string, timeoutFlag int, verbose, failFast bool) error {
+func runTests(path, imageFlag string, timeoutFlag int, verbose, failFast bool, parallel int) error {
 	// Determine working dir for config
 	wd, err := os.Getwd()
 	if err != nil {
@@ -85,6 +90,12 @@ func runTests(path, imageFlag string, timeoutFlag int, verbose, failFast bool) e
 		timeoutSec = timeoutFlag
 	}
 	timeout := time.Duration(timeoutSec) * time.Second
+
+	// Resolve parallelism
+	workers := parallel
+	if workers <= 0 {
+		workers = runtime.GOMAXPROCS(0)
+	}
 
 	// Collect .smoko files
 	files, err := collectFiles(path)
@@ -120,47 +131,112 @@ func runTests(path, imageFlag string, timeoutFlag int, verbose, failFast bool) e
 	}
 	defer dc.Close()
 
-	rep := reporter.New(os.Stdout, verbose)
-	ctx := context.Background()
-	allPassed := true
+	// Build a flat list of scenario jobs with resolved images
+	type scenarioJob struct {
+		feat    parser.Feature
+		sc      parser.Scenario
+		img     string
+		timeout time.Duration
+	}
 
+	var jobs []scenarioJob
 	for _, pf := range parsed {
 		for _, feat := range pf.features {
-			// Resolve image: flag > feature Image: > .smokorc
 			img := resolveImage(imageFlag, feat.Image, cfg.Image)
 			if img == "" {
 				return fmt.Errorf("no Docker image specified for feature %q — use --image, Image: in .smoko file, or set image in .smokorc", feat.Name)
 			}
-
-			fmt.Fprintf(os.Stdout, "\nFeature: %s\n", feat.Name)
-
-			// Pull image if not present
-			if err := dc.PullIfMissing(ctx, img); err != nil {
-				return fmt.Errorf("docker pull %s: %w", img, err)
-			}
-
 			for _, sc := range feat.Scenarios {
-				result := runScenario(ctx, dc, feat, sc, img, timeout)
-				result.FeatureName = feat.Name
-
-				if !result.Passed || result.Error != nil {
-					allPassed = false
-				}
-				rep.Add(result)
-
-				if failFast && (!result.Passed || result.Error != nil) {
-					rep.PrintSummary()
-					if allPassed {
-						return nil
-					}
-					return fmt.Errorf("tests failed")
-				}
+				jobs = append(jobs, scenarioJob{feat: feat, sc: sc, img: img, timeout: timeout})
 			}
 		}
 	}
 
+	// Pull all unique images upfront (sequential — happens once)
+	ctx := context.Background()
+	seenImages := make(map[string]bool)
+	for _, j := range jobs {
+		if !seenImages[j.img] {
+			seenImages[j.img] = true
+			if err := dc.PullIfMissing(ctx, j.img); err != nil {
+				return fmt.Errorf("docker pull %s: %w", j.img, err)
+			}
+		}
+	}
+
+	rep := reporter.New(os.Stdout, verbose)
+
+	if workers == 1 {
+		// Sequential path (original behavior, slightly optimized)
+		allPassed := true
+		currentFeature := ""
+		for _, j := range jobs {
+			if j.feat.Name != currentFeature {
+				currentFeature = j.feat.Name
+				fmt.Fprintf(os.Stdout, "\nFeature: %s\n", j.feat.Name)
+			}
+			result := runScenario(ctx, dc, j.feat, j.sc, j.img, j.timeout)
+			result.FeatureName = j.feat.Name
+
+			if !result.Passed || result.Error != nil {
+				allPassed = false
+			}
+			rep.Add(result)
+
+			if failFast && (!result.Passed || result.Error != nil) {
+				rep.PrintSummary()
+				return fmt.Errorf("tests failed")
+			}
+		}
+
+		passed := rep.PrintSummary()
+		if !passed || !allPassed {
+			return fmt.Errorf("tests failed")
+		}
+		return nil
+	}
+
+	// Parallel path
+	cancelCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var failed atomic.Bool
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+
+	for _, j := range jobs {
+		if failFast && failed.Load() {
+			break
+		}
+
+		sem <- struct{}{} // acquire
+		wg.Add(1)
+
+		go func(j scenarioJob) {
+			defer wg.Done()
+			defer func() { <-sem }() // release
+
+			if failFast && failed.Load() {
+				return
+			}
+
+			result := runScenario(cancelCtx, dc, j.feat, j.sc, j.img, j.timeout)
+			result.FeatureName = j.feat.Name
+
+			if !result.Passed || result.Error != nil {
+				failed.Store(true)
+				if failFast {
+					cancel()
+				}
+			}
+			rep.Add(result)
+		}(j)
+	}
+
+	wg.Wait()
+
 	passed := rep.PrintSummary()
-	if !passed || !allPassed {
+	if !passed || failed.Load() {
 		return fmt.Errorf("tests failed")
 	}
 	return nil
@@ -191,15 +267,10 @@ func runScenario(ctx context.Context, dc *docker.Client, feat parser.Feature, sc
 		return rep
 	}
 
-	// Run Given steps
-	for _, step := range allGiven {
-		if step.ResolvedType != parser.StepGiven {
-			continue
-		}
-		if err := executor.RunGiven(ctx, dc, containerID, step); err != nil {
-			rep.Error = fmt.Errorf("Given %q: %w", step.Text, err)
-			return rep
-		}
+	// Run Given steps (batched for performance)
+	if err := executor.RunGivenSteps(ctx, dc, containerID, allGiven); err != nil {
+		rep.Error = err
+		return rep
 	}
 
 	// Find and run the When step
@@ -223,22 +294,31 @@ func runScenario(ctx context.Context, dc *docker.Client, feat parser.Feature, sc
 		rep.Stderr = wr.Stderr
 	}
 
-	// Evaluate Then steps
+	// Evaluate Then steps (batched filesystem checks for performance)
 	rep.Passed = true
-	for _, step := range sc.Steps {
-		if step.ResolvedType != parser.StepThen {
-			continue
+	thenSteps := make([]parser.Step, 0)
+	thenIndices := make([]int, 0)
+	for i, step := range sc.Steps {
+		if step.ResolvedType == parser.StepThen {
+			thenSteps = append(thenSteps, step)
+			thenIndices = append(thenIndices, i)
 		}
-		if whenResult == nil {
+	}
+
+	if whenResult == nil {
+		for range thenSteps {
 			ar := assertions.Result{Pass: false, Message: "no When step ran before this Then assertion"}
 			rep.AssertionResults = append(rep.AssertionResults, ar)
 			rep.Passed = false
-			continue
 		}
-		ar := assertions.Evaluate(ctx, step, whenResult, dc, containerID)
-		rep.AssertionResults = append(rep.AssertionResults, ar)
-		if !ar.Pass {
-			rep.Passed = false
+	} else {
+		allResults := assertions.EvaluateAll(ctx, sc.Steps, whenResult, dc, containerID)
+		for _, idx := range thenIndices {
+			ar := allResults[idx]
+			rep.AssertionResults = append(rep.AssertionResults, ar)
+			if !ar.Pass {
+				rep.Passed = false
+			}
 		}
 	}
 
