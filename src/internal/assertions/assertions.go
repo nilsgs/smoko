@@ -47,7 +47,7 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 	// --- output contains ---
 	if m := reOutputContains.FindStringSubmatch(text); m != nil {
 		negate := strings.Contains(text, "does not contain")
-		needle := m[1]
+		needle := unescapeString(m[1])
 		haystack := combined(wr, text)
 		has := strings.Contains(haystack, needle)
 		if negate && has {
@@ -62,7 +62,7 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 	// --- output matches pattern ---
 	if m := reOutputMatches.FindStringSubmatch(text); m != nil {
 		negate := strings.Contains(text, "does not match")
-		pattern := m[1]
+		pattern := unescapeString(m[1])
 		re, err := regexp.Compile(pattern)
 		if err != nil {
 			return fail("invalid regex %q: %v", pattern, err)
@@ -97,32 +97,79 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 
 	// --- directory exists ---
 	if m := reDirExists.FindStringSubmatch(text); m != nil {
-		path := m[1]
+		negate := strings.Contains(text, "does not exist")
+		path := unescapeString(m[1])
 		exists, err := dc.DirExists(ctx, containerID, path)
 		if err != nil {
 			return fail("directory exists check error: %v", err)
 		}
-		if !exists {
+		if negate && exists {
+			return fail("directory %q unexpectedly exists", path)
+		}
+		if !negate && !exists {
 			return fail("directory %q does not exist", path)
 		}
 		return pass()
 	}
 
-	// --- file contains ---
-	if m := reFileContains.FindStringSubmatch(text); m != nil {
-		path := m[1]
-		needle := m[2]
+	// --- file contains (block form) ---
+	if m := reFileContainsBlock.FindStringSubmatch(text); m != nil {
+		negate := strings.Contains(text, "does not contain")
+		path := unescapeString(m[1])
+		needle := step.Block
 		content, err := dc.ReadFile(ctx, containerID, path)
 		if err != nil {
 			return fail("read file %q: %v", path, err)
 		}
-		if !strings.Contains(content, needle) {
+		if negate && strings.Contains(content, needle) {
+			return fail("file %q unexpectedly contains %q", path, needle)
+		}
+		if !negate && !strings.Contains(content, needle) {
+			return fail("file %q does not contain %q\nActual content:\n%s", path, needle, content)
+		}
+		return pass()
+	}
+
+	// --- file contains (inline form) ---
+	if m := reFileContains.FindStringSubmatch(text); m != nil {
+		negate := strings.Contains(text, "does not contain")
+		path := unescapeString(m[1])
+		needle := unescapeString(m[2])
+		content, err := dc.ReadFile(ctx, containerID, path)
+		if err != nil {
+			return fail("read file %q: %v", path, err)
+		}
+		if negate && strings.Contains(content, needle) {
+			return fail("file %q unexpectedly contains %q", path, needle)
+		}
+		if !negate && !strings.Contains(content, needle) {
 			return fail("file %q does not contain %q\nActual content:\n%s", path, needle, content)
 		}
 		return pass()
 	}
 
 	return fail("unknown Then assertion: %q", text)
+}
+
+// unescapeString replaces \" with " and \\ with \ in a captured assertion string.
+func unescapeString(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			switch s[i+1] {
+			case '"':
+				b.WriteByte('"')
+				i++
+				continue
+			case '\\':
+				b.WriteByte('\\')
+				i++
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }
 
 // combined returns the appropriate output stream based on the step text keyword.
@@ -141,17 +188,21 @@ var (
 	reExitCodeIsNot = regexp.MustCompile(`^exit code is not (\d+)$`)
 
 	// output contains / stdout contains / stderr contains / does not contain
-	reOutputContains = regexp.MustCompile(`^(?:output|stdout|stderr)(?: does not)? contains? "([^"]+)"$`)
+	// Capture group allows \" escape sequences.
+	reOutputContains = regexp.MustCompile(`^(?:output|stdout|stderr)(?: does not)? contains? "((?:[^"\\]|\\.)*)"`)
 
 	// output matches pattern / does not match pattern
-	reOutputMatches = regexp.MustCompile(`^(?:output)(?: does not)? matches? pattern "([^"]+)"$`)
+	reOutputMatches = regexp.MustCompile(`^(?:output)(?: does not)? matches? pattern "((?:[^"\\]|\\.)*)"`)
 
 	// file "X" exists / does not exist
-	reFileExists = regexp.MustCompile(`^file "([^"]+)"(?:(?: does not)? exist[s]?)$`)
+	reFileExists = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"`)
 
-	// directory "X" exists
-	reDirExists = regexp.MustCompile(`^directory "([^"]+)" exists$`)
+	// directory "X" exists / does not exist
+	reDirExists = regexp.MustCompile(`^(?:the )?directory "((?:[^"\\]|\\.)*)"(?:(?: does not)? exist[s]?)`)
 
-	// file "X" contains "Y"
-	reFileContains = regexp.MustCompile(`^file "([^"]+)" contains "([^"]+)"$`)
+	// file "X" [does not] contains: <block>
+	reFileContainsBlock = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"` + `(?: does not)? contains:$`)
+
+	// file "X" [does not] contains "Y"
+	reFileContains = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"` + `(?: does not)? contains "((?:[^"\\]|\\.)*)"`)
 )

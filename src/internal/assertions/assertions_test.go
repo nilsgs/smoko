@@ -106,3 +106,31 @@ func TestUnknownAssertion(t *testing.T) {
 	assert.False(t, r.Pass)
 	assert.Contains(t, r.Message, "unknown Then assertion")
 }
+
+func TestOutputContainsEscapedQuote(t *testing.T) {
+	wr := newWhenResult(`"name": "value"`, "", 0)
+	step := parser.Step{Text: `output contains "\"name\": \"value\""`}
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	assert.True(t, r.Pass)
+}
+
+func TestOutputDoesNotContainEscapedQuote(t *testing.T) {
+	wr := newWhenResult(`no json here`, "", 0)
+	step := parser.Step{Text: `output does not contain "\"name\": \"value\""`}
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	assert.True(t, r.Pass)
+}
+
+func TestOutputContainsEscapedQuoteFailure(t *testing.T) {
+	wr := newWhenResult(`no json here`, "", 0)
+	step := parser.Step{Text: `output contains "\"name\": \"value\""`}
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	assert.False(t, r.Pass)
+}
+
+func TestOutputMatchesEscapedQuote(t *testing.T) {
+	wr := newWhenResult(`{"ok":true}`, "", 0)
+	step := parser.Step{Text: `output matches pattern "\{\"ok\":true\}"`}
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	assert.True(t, r.Pass)
+}

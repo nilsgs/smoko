@@ -199,16 +199,37 @@ Checks that the specified file exists in the container.
 #### Assert file content
 ```
 Then file "path/to/file.txt" contains "expected content"
+Then file "path/to/file.txt" does not contain "unexpected text"
 ```
 
-Checks that the file contains the specified text as a substring.
+Checks that the file contains (or does not contain) the specified text as a substring.
+
+For content with double quotes, escape them with `\"`:
+```
+Then file "config.json" contains "\"name\": \"value\""
+```
+
+For multi-line content, use the block form with a trailing `:`:
+```
+Then file ".curriculum" contains:
+  "dependencies": [
+    { "name": "dummy-skill" }
+  ]
+```
+
+Negation works with the block form too:
+```
+Then file ".curriculum" does not contain:
+  "version": "1.0.0"
+```
 
 #### Assert directory exists
 ```
 Then the directory "path/to/dir" exists
+Then the directory "path/to/dir" does not exist
 ```
 
-Checks that the specified directory exists in the container.
+Checks that the specified directory exists (or does not exist) in the container.
 
 ## Common Patterns
 
@@ -367,10 +388,25 @@ Given environment variable "DEBUG" is set to "1"
 ```
 
 ### File Content in Assertions
-For complex file content assertions, use `contains` (substring match) rather than exact matches. This makes tests more maintainable:
+For complex file content assertions, use `contains` (substring match) rather than exact matches. This makes tests more maintainable.
 
+Escape double quotes inside assertion strings with `\"`:
 ```
 Then file "output.json" contains "\"status\": \"success\""
+```
+
+For multi-line content (e.g. JSON blocks), use the block form:
+```
+Then file ".curriculum" contains:
+  "dependencies": [
+    { "name": "dummy-skill" }
+  ]
+```
+
+To assert absence of content:
+```
+Then file ".curriculum" does not contain "\"version\""
+Then output does not contain "error"
 ```
 
 ### Organizing Fixtures
