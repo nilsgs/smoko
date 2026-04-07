@@ -1,0 +1,10 @@
+Feature: Environment Variables
+  Testing environment variable passing
+
+  Image: alpine:latest
+
+  Scenario: Read environment variable
+    Given environment variable "MY_VAR" is set to "hello_world"
+    When I run "sh -c 'echo $MY_VAR'"
+    Then exit code is 0
+    Then output contains "hello_world"

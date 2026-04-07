@@ -1,0 +1,94 @@
+# Gitignore
+
+## Go-specific ignores
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace file
+go.work
+
+# Dependency directories (remove the comment below to include it)
+vendor/
+
+# Go module files
+go.mod.bak
+go.sum.bak
+
+# Go build cache
+.cache/
+
+## OS-specific ignores
+# Windows
+Thumbs.db
+Desktop.ini
+*.lnk
+~$*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Linux
+.~*
+
+## IDE-specific ignores
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# JetBrains IDEs
+.idea/
+*.iml
+*.iws
+*.ipr
+.DS_Store
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+.swp
+.swo
+*~
+.vim/
+
+## Docker-related ignores
+.dockerignore
+Dockerfile.local
+
+## Development/Local ignores
+*.env
+*.env.local
+.env.*.local
+secrets/
+credentials.json
+local-config.toml
+
+## Test and build artifacts (but keep testdata/)
+bin/
+dist/
+build/
+*.coverage
+
+## IDE temp files
+.netrc
+
+## Project-specific
+# Binary in src/ can be ignored if built locally
+# (keeping src/smoko.exe for now, but could add if desired)

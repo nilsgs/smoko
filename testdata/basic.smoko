@@ -1,0 +1,13 @@
+Feature: Hello World CLI
+  Testing basic echo functionality
+
+  Image: alpine:latest
+
+  Scenario: Print greeting
+    When I run "echo 'Hello, World!'"
+    Then exit code is 0
+    Then output contains "Hello, World!"
+
+  Scenario: Non-zero exit code
+    When I run "sh -c 'exit 1'"
+    Then exit code is 1

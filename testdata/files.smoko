@@ -1,0 +1,23 @@
+Feature: File Operations
+  Testing file creation and assertions
+
+  Image: alpine:latest
+
+  Scenario: Create and verify file
+    Given a file "hello.txt" with content:
+      Hello from smoko
+    When I run "cat hello.txt"
+    Then exit code is 0
+    Then output contains "Hello from smoko"
+    Then file "hello.txt" exists
+
+  Scenario: Missing file check
+    When I run "ls nonexistent.txt"
+    Then exit code is not 0
+    Then file "nonexistent.txt" does not exist
+
+  Scenario: Create directory
+    Given the directory "mydir" exists
+    When I run "ls -d mydir"
+    Then exit code is 0
+    Then directory "mydir" exists

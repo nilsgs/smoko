@@ -1,0 +1,18 @@
+Feature: Background Steps
+  Testing that Background steps run before each scenario
+
+  Image: alpine:latest
+
+  Background:
+    Given a file "shared.txt" with content:
+      shared content
+
+  Scenario: First scenario sees background file
+    When I run "cat shared.txt"
+    Then exit code is 0
+    Then output contains "shared content"
+
+  Scenario: Second scenario also sees background file
+    When I run "cat shared.txt"
+    Then exit code is 0
+    Then file "shared.txt" exists

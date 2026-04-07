@@ -1,0 +1,8 @@
+Feature: Failure Detection
+  Smoko must correctly report failing assertions
+
+  Image: alpine:latest
+
+  Scenario: Expected failure - wrong exit code
+    When I run "echo ok"
+    Then exit code is 1
