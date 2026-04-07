@@ -80,7 +80,7 @@ secrets/
 credentials.json
 local-config.toml
 
-## Test and build artifacts (but keep testdata/)
+## Test and build artifacts (but keep specs/)
 bin/
 dist/
 build/

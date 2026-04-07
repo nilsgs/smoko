@@ -58,7 +58,7 @@ Feature: Hello World CLI
 smoko run test.smoko
 
 # Run all tests in a directory
-smoko run testdata/
+smoko run specs/
 
 # With options
 smoko run test.smoko --image myimage:latest --verbose --fail-fast
