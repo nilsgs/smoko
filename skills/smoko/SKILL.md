@@ -318,6 +318,16 @@ smoko run test.smoko --fail-fast
 
 Stops after the first failing scenario instead of running all tests.
 
+#### Run scenarios in parallel
+```bash
+smoko run specs/ --parallel 4
+smoko run specs/ --parallel 0
+```
+
+Runs up to N scenarios concurrently. `--parallel 0` auto-detects based on available CPU cores (`GOMAXPROCS`). Default is `1` (sequential). Since each scenario runs in its own Docker container, parallelism is safe. Useful for large test suites where Docker overhead dominates.
+
+> **Tip:** Combine with `--fail-fast` to stop as soon as any parallel scenario fails.
+
 ### Image Resolution
 
 Smoko resolves the Docker image to use in this order (highest to lowest priority):
