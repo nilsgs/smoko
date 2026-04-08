@@ -1,3 +1,5 @@
+![Banner](img/banner.png)
+
 # Smoko — Smoke Test Tool
 
 A platform-agnostic smoke testing tool for CLI applications. Write tests in a Gherkin-inspired BDD-style DSL and execute them in isolated Docker containers.
