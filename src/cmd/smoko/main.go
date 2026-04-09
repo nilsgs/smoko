@@ -62,7 +62,7 @@ func runCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&image, "image", "", "Docker image to use (overrides .smokorc and inline Image:)")
-	cmd.Flags().IntVar(&timeout, "timeout", 0, "Seconds to wait for each When step (default: 30)")
+	cmd.Flags().IntVar(&timeout, "timeout", 0, "Seconds to wait for each setup/action command (default: 30)")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Print stdout/stderr even for passing scenarios")
 	cmd.Flags().BoolVar(&failFast, "fail-fast", false, "Stop after the first failed scenario")
 	cmd.Flags().IntVar(&parallel, "parallel", 1, "Number of scenarios to run in parallel (0 = auto)")
@@ -267,8 +267,8 @@ func runScenario(ctx context.Context, dc *docker.Client, feat parser.Feature, sc
 		return rep
 	}
 
-	// Run Given steps (batched for performance)
-	if err := executor.RunGivenSteps(ctx, dc, containerID, allGiven); err != nil {
+	// Run Given steps in declared order, batching adjacent file writes.
+	if err := executor.RunGivenSteps(ctx, dc, containerID, allGiven, timeout); err != nil {
 		rep.Error = err
 		return rep
 	}

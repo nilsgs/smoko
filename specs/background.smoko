@@ -6,6 +6,7 @@ Feature: Background Steps
   Background:
     Given a file "shared.txt" with content:
       shared content
+    Given I run "cp shared.txt shared-copy.txt"
 
   Scenario: First scenario sees background file
     When I run "cat shared.txt"
@@ -16,3 +17,8 @@ Feature: Background Steps
     When I run "cat shared.txt"
     Then exit code is 0
     Then file "shared.txt" exists
+
+  Scenario: Background setup commands also run
+    When I run "cat shared-copy.txt"
+    Then exit code is 0
+    Then output contains "shared content"

@@ -2,19 +2,33 @@ package assertions
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/theory/jsonpath"
 
 	"github.com/nskut/smoko/internal/docker"
 	"github.com/nskut/smoko/internal/executor"
 	"github.com/nskut/smoko/internal/parser"
 )
 
+type dockerReader interface {
+	FileExists(ctx context.Context, containerID, path string) (bool, error)
+	DirExists(ctx context.Context, containerID, path string) (bool, error)
+	ReadFile(ctx context.Context, containerID, path string) (string, error)
+	BatchFSCheck(ctx context.Context, containerID string, checks []docker.FSCheck) ([]docker.FSResult, error)
+}
+
 // regexCache caches compiled user-provided regex patterns.
-var regexCache sync.Map // string → *regexp.Regexp
+var regexCache sync.Map // string -> *regexp.Regexp
+
+// jsonPathCache caches compiled JSONPath expressions.
+var jsonPathCache sync.Map // string -> *jsonpath.Path
 
 // compileRegex compiles a regex pattern, returning a cached version if available.
 func compileRegex(pattern string) (*regexp.Regexp, error) {
@@ -27,6 +41,18 @@ func compileRegex(pattern string) (*regexp.Regexp, error) {
 	}
 	regexCache.Store(pattern, re)
 	return re, nil
+}
+
+func compileJSONPath(path string) (*jsonpath.Path, error) {
+	if cached, ok := jsonPathCache.Load(path); ok {
+		return cached.(*jsonpath.Path), nil
+	}
+	compiled, err := jsonpath.Parse(path)
+	if err != nil {
+		return nil, err
+	}
+	jsonPathCache.Store(path, compiled)
+	return compiled, nil
 }
 
 // Result is the outcome of a single assertion.
@@ -43,24 +69,21 @@ func fail(format string, args ...interface{}) Result {
 // EvaluateAll evaluates all Then steps, batching filesystem checks into a single
 // docker exec for performance. Steps that don't require filesystem access are
 // evaluated locally.
-func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResult, dc *docker.Client, containerID string) []Result {
+func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResult, dc dockerReader, containerID string) []Result {
 	results := make([]Result, len(steps))
 
-	// First pass: identify which steps need filesystem checks and collect them
-	type fsNeed struct {
-		stepIdx int
-		checks  []docker.FSCheck
+	type checkRef struct {
+		stepIdx      int
+		globalIdx    int
+		checkKind    string
+		path         string
+		needle       string
+		negate       bool
+		jsonPath     string
+		expectedJSON string
 	}
 
 	var allChecks []docker.FSCheck
-	type checkRef struct {
-		stepIdx    int
-		globalIdx  int
-		checkKind  string // "file-exists", "dir-exists", "file-contains", "file-contains-block"
-		path       string
-		needle     string
-		negate     bool
-	}
 	var refs []checkRef
 
 	for i, step := range steps {
@@ -69,51 +92,111 @@ func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResu
 		}
 		text := step.Text
 
-		// file exists / does not exist
 		if m := reFileExists.FindStringSubmatch(text); m != nil {
 			negate := strings.Contains(text, "does not exist")
 			path := unescapeString(m[1])
-			refs = append(refs, checkRef{stepIdx: i, globalIdx: len(allChecks), checkKind: "file-exists", path: path, negate: negate})
+			refs = append(refs, checkRef{
+				stepIdx:   i,
+				globalIdx: len(allChecks),
+				checkKind: "file-exists",
+				path:      path,
+				negate:    negate,
+			})
 			allChecks = append(allChecks, docker.FSCheck{Kind: docker.FSCheckFileExists, Path: path})
 			continue
 		}
 
-		// directory exists / does not exist
 		if m := reDirExists.FindStringSubmatch(text); m != nil {
 			negate := strings.Contains(text, "does not exist")
 			path := unescapeString(m[1])
-			refs = append(refs, checkRef{stepIdx: i, globalIdx: len(allChecks), checkKind: "dir-exists", path: path, negate: negate})
+			refs = append(refs, checkRef{
+				stepIdx:   i,
+				globalIdx: len(allChecks),
+				checkKind: "dir-exists",
+				path:      path,
+				negate:    negate,
+			})
 			allChecks = append(allChecks, docker.FSCheck{Kind: docker.FSCheckDirExists, Path: path})
 			continue
 		}
 
-		// file contains block form
 		if m := reFileContainsBlock.FindStringSubmatch(text); m != nil {
 			negate := strings.Contains(text, "does not contain")
 			path := unescapeString(m[1])
-			refs = append(refs, checkRef{stepIdx: i, globalIdx: len(allChecks), checkKind: "file-contains-block", path: path, needle: step.Block, negate: negate})
+			refs = append(refs, checkRef{
+				stepIdx:   i,
+				globalIdx: len(allChecks),
+				checkKind: "file-contains",
+				path:      path,
+				needle:    step.Block,
+				negate:    negate,
+			})
 			allChecks = append(allChecks, docker.FSCheck{Kind: docker.FSCheckReadFile, Path: path})
 			continue
 		}
 
-		// file contains inline form
 		if m := reFileContains.FindStringSubmatch(text); m != nil {
 			negate := strings.Contains(text, "does not contain")
 			path := unescapeString(m[1])
-			needle := unescapeString(m[2])
-			refs = append(refs, checkRef{stepIdx: i, globalIdx: len(allChecks), checkKind: "file-contains", path: path, needle: needle, negate: negate})
+			refs = append(refs, checkRef{
+				stepIdx:   i,
+				globalIdx: len(allChecks),
+				checkKind: "file-contains",
+				path:      path,
+				needle:    unescapeString(m[2]),
+				negate:    negate,
+			})
+			allChecks = append(allChecks, docker.FSCheck{Kind: docker.FSCheckReadFile, Path: path})
+			continue
+		}
+
+		if m := reFileJSONExists.FindStringSubmatch(text); m != nil {
+			path := unescapeString(m[1])
+			refs = append(refs, checkRef{
+				stepIdx:   i,
+				globalIdx: len(allChecks),
+				checkKind: "file-json-exists",
+				path:      path,
+				jsonPath:  unescapeString(m[2]),
+			})
+			allChecks = append(allChecks, docker.FSCheck{Kind: docker.FSCheckReadFile, Path: path})
+			continue
+		}
+
+		if m := reFileJSONEqualsBlock.FindStringSubmatch(text); m != nil {
+			path := unescapeString(m[1])
+			refs = append(refs, checkRef{
+				stepIdx:      i,
+				globalIdx:    len(allChecks),
+				checkKind:    "file-json-equals",
+				path:         path,
+				jsonPath:     unescapeString(m[2]),
+				expectedJSON: step.Block,
+			})
+			allChecks = append(allChecks, docker.FSCheck{Kind: docker.FSCheckReadFile, Path: path})
+			continue
+		}
+
+		if m := reFileJSONEqualsInline.FindStringSubmatch(text); m != nil {
+			path := unescapeString(m[1])
+			refs = append(refs, checkRef{
+				stepIdx:      i,
+				globalIdx:    len(allChecks),
+				checkKind:    "file-json-equals",
+				path:         path,
+				jsonPath:     unescapeString(m[2]),
+				expectedJSON: strings.TrimSpace(m[3]),
+			})
 			allChecks = append(allChecks, docker.FSCheck{Kind: docker.FSCheckReadFile, Path: path})
 			continue
 		}
 	}
 
-	// Execute batched filesystem checks
 	var fsResults []docker.FSResult
 	if len(allChecks) > 0 {
 		var err error
 		fsResults, err = dc.BatchFSCheck(ctx, containerID, allChecks)
 		if err != nil {
-			// Fall back to individual evaluation
 			for i, step := range steps {
 				if step.ResolvedType != parser.StepThen {
 					continue
@@ -124,7 +207,6 @@ func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResu
 		}
 	}
 
-	// Build a map of step index → fs result for steps that were batched
 	batchedSteps := make(map[int]bool)
 	for _, ref := range refs {
 		batchedSteps[ref.stepIdx] = true
@@ -132,41 +214,26 @@ func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResu
 
 		switch ref.checkKind {
 		case "file-exists":
-			if fr.Err != nil {
-				results[ref.stepIdx] = fail("file exists check error: %v", fr.Err)
-			} else if ref.negate && fr.Exists {
-				results[ref.stepIdx] = fail("file %q unexpectedly exists", ref.path)
-			} else if !ref.negate && !fr.Exists {
-				results[ref.stepIdx] = fail("file %q does not exist", ref.path)
-			} else {
-				results[ref.stepIdx] = pass()
-			}
-
+			results[ref.stepIdx] = evaluateExistsResult("file", ref.path, ref.negate, fr)
 		case "dir-exists":
-			if fr.Err != nil {
-				results[ref.stepIdx] = fail("directory exists check error: %v", fr.Err)
-			} else if ref.negate && fr.Exists {
-				results[ref.stepIdx] = fail("directory %q unexpectedly exists", ref.path)
-			} else if !ref.negate && !fr.Exists {
-				results[ref.stepIdx] = fail("directory %q does not exist", ref.path)
-			} else {
-				results[ref.stepIdx] = pass()
-			}
-
-		case "file-contains-block", "file-contains":
+			results[ref.stepIdx] = evaluateExistsResult("directory", ref.path, ref.negate, fr)
+		case "file-contains":
+			results[ref.stepIdx] = evaluateFileContainsResult(ref.path, ref.needle, ref.negate, fr)
+		case "file-json-exists":
 			if fr.Err != nil {
 				results[ref.stepIdx] = fail("read file %q: %v", ref.path, fr.Err)
-			} else if ref.negate && strings.Contains(fr.Content, ref.needle) {
-				results[ref.stepIdx] = fail("file %q unexpectedly contains %q", ref.path, ref.needle)
-			} else if !ref.negate && !strings.Contains(fr.Content, ref.needle) {
-				results[ref.stepIdx] = fail("file %q does not contain %q\nActual content:\n%s", ref.path, ref.needle, fr.Content)
 			} else {
-				results[ref.stepIdx] = pass()
+				results[ref.stepIdx] = evaluateJSONExists(fmt.Sprintf("file %q", ref.path), fr.Content, ref.jsonPath)
+			}
+		case "file-json-equals":
+			if fr.Err != nil {
+				results[ref.stepIdx] = fail("read file %q: %v", ref.path, fr.Err)
+			} else {
+				results[ref.stepIdx] = evaluateJSONEquals(fmt.Sprintf("file %q", ref.path), fr.Content, ref.jsonPath, ref.expectedJSON)
 			}
 		}
 	}
 
-	// Evaluate non-batched steps individually
 	for i, step := range steps {
 		if step.ResolvedType != parser.StepThen {
 			continue
@@ -182,10 +249,9 @@ func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResu
 
 // Evaluate evaluates a Then/And step against the captured WhenResult and
 // the container filesystem.
-func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc *docker.Client, containerID string) Result {
+func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc dockerReader, containerID string) Result {
 	text := step.Text
 
-	// --- exit code ---
 	if m := reExitCodeIs.FindStringSubmatch(text); m != nil {
 		expected, _ := strconv.Atoi(m[1])
 		if wr.ExitCode != expected {
@@ -201,7 +267,6 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 		return pass()
 	}
 
-	// --- output contains ---
 	if m := reOutputContains.FindStringSubmatch(text); m != nil {
 		negate := strings.Contains(text, "does not contain")
 		needle := unescapeString(m[1])
@@ -216,7 +281,6 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 		return pass()
 	}
 
-	// --- output matches pattern ---
 	if m := reOutputMatches.FindStringSubmatch(text); m != nil {
 		negate := strings.Contains(text, "does not match")
 		pattern := unescapeString(m[1])
@@ -235,10 +299,24 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 		return pass()
 	}
 
-	// --- file exists ---
+	if m := reOutputJSONExists.FindStringSubmatch(text); m != nil {
+		source := m[1]
+		return evaluateJSONExists(source, selectOutputJSONSource(wr, source), unescapeString(m[2]))
+	}
+
+	if m := reOutputJSONEqualsBlock.FindStringSubmatch(text); m != nil {
+		source := m[1]
+		return evaluateJSONEquals(source, selectOutputJSONSource(wr, source), unescapeString(m[2]), step.Block)
+	}
+
+	if m := reOutputJSONEqualsInline.FindStringSubmatch(text); m != nil {
+		source := m[1]
+		return evaluateJSONEquals(source, selectOutputJSONSource(wr, source), unescapeString(m[2]), strings.TrimSpace(m[3]))
+	}
+
 	if m := reFileExists.FindStringSubmatch(text); m != nil {
 		negate := strings.Contains(text, "does not exist")
-		path := m[1]
+		path := unescapeString(m[1])
 		exists, err := dc.FileExists(ctx, containerID, path)
 		if err != nil {
 			return fail("file exists check error: %v", err)
@@ -252,7 +330,6 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 		return pass()
 	}
 
-	// --- directory exists ---
 	if m := reDirExists.FindStringSubmatch(text); m != nil {
 		negate := strings.Contains(text, "does not exist")
 		path := unescapeString(m[1])
@@ -269,43 +346,156 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 		return pass()
 	}
 
-	// --- file contains (block form) ---
 	if m := reFileContainsBlock.FindStringSubmatch(text); m != nil {
 		negate := strings.Contains(text, "does not contain")
 		path := unescapeString(m[1])
-		needle := step.Block
 		content, err := dc.ReadFile(ctx, containerID, path)
 		if err != nil {
 			return fail("read file %q: %v", path, err)
 		}
-		if negate && strings.Contains(content, needle) {
-			return fail("file %q unexpectedly contains %q", path, needle)
-		}
-		if !negate && !strings.Contains(content, needle) {
-			return fail("file %q does not contain %q\nActual content:\n%s", path, needle, content)
-		}
-		return pass()
+		return evaluateFileContainsContent(path, content, step.Block, negate)
 	}
 
-	// --- file contains (inline form) ---
 	if m := reFileContains.FindStringSubmatch(text); m != nil {
 		negate := strings.Contains(text, "does not contain")
 		path := unescapeString(m[1])
-		needle := unescapeString(m[2])
 		content, err := dc.ReadFile(ctx, containerID, path)
 		if err != nil {
 			return fail("read file %q: %v", path, err)
 		}
-		if negate && strings.Contains(content, needle) {
-			return fail("file %q unexpectedly contains %q", path, needle)
+		return evaluateFileContainsContent(path, content, unescapeString(m[2]), negate)
+	}
+
+	if m := reFileJSONExists.FindStringSubmatch(text); m != nil {
+		path := unescapeString(m[1])
+		content, err := dc.ReadFile(ctx, containerID, path)
+		if err != nil {
+			return fail("read file %q: %v", path, err)
 		}
-		if !negate && !strings.Contains(content, needle) {
-			return fail("file %q does not contain %q\nActual content:\n%s", path, needle, content)
+		return evaluateJSONExists(fmt.Sprintf("file %q", path), content, unescapeString(m[2]))
+	}
+
+	if m := reFileJSONEqualsBlock.FindStringSubmatch(text); m != nil {
+		path := unescapeString(m[1])
+		content, err := dc.ReadFile(ctx, containerID, path)
+		if err != nil {
+			return fail("read file %q: %v", path, err)
 		}
-		return pass()
+		return evaluateJSONEquals(fmt.Sprintf("file %q", path), content, unescapeString(m[2]), step.Block)
+	}
+
+	if m := reFileJSONEqualsInline.FindStringSubmatch(text); m != nil {
+		path := unescapeString(m[1])
+		content, err := dc.ReadFile(ctx, containerID, path)
+		if err != nil {
+			return fail("read file %q: %v", path, err)
+		}
+		return evaluateJSONEquals(fmt.Sprintf("file %q", path), content, unescapeString(m[2]), strings.TrimSpace(m[3]))
 	}
 
 	return fail("unknown Then assertion: %q", text)
+}
+
+func evaluateExistsResult(kind, path string, negate bool, fr docker.FSResult) Result {
+	if fr.Err != nil {
+		return fail("%s exists check error: %v", kind, fr.Err)
+	}
+	if negate && fr.Exists {
+		return fail("%s %q unexpectedly exists", kind, path)
+	}
+	if !negate && !fr.Exists {
+		return fail("%s %q does not exist", kind, path)
+	}
+	return pass()
+}
+
+func evaluateFileContainsResult(path, needle string, negate bool, fr docker.FSResult) Result {
+	if fr.Err != nil {
+		return fail("read file %q: %v", path, fr.Err)
+	}
+	return evaluateFileContainsContent(path, fr.Content, needle, negate)
+}
+
+func evaluateFileContainsContent(path, content, needle string, negate bool) Result {
+	if negate && strings.Contains(content, needle) {
+		return fail("file %q unexpectedly contains %q", path, needle)
+	}
+	if !negate && !strings.Contains(content, needle) {
+		return fail("file %q does not contain %q\nActual content:\n%s", path, needle, content)
+	}
+	return pass()
+}
+
+func evaluateJSONExists(sourceLabel, rawJSON, pathExpr string) Result {
+	value, err := parseJSONValue(rawJSON)
+	if err != nil {
+		return fail("%s is not valid JSON: %v", sourceLabel, err)
+	}
+	path, err := compileJSONPath(pathExpr)
+	if err != nil {
+		return fail("invalid JSONPath %q: %v", pathExpr, err)
+	}
+	nodes := path.Select(value)
+	if len(nodes) == 0 {
+		return fail("%s JSONPath %q did not match any value", sourceLabel, pathExpr)
+	}
+	return pass()
+}
+
+func evaluateJSONEquals(sourceLabel, rawJSON, pathExpr, expectedRaw string) Result {
+	value, err := parseJSONValue(rawJSON)
+	if err != nil {
+		return fail("%s is not valid JSON: %v", sourceLabel, err)
+	}
+	path, err := compileJSONPath(pathExpr)
+	if err != nil {
+		return fail("invalid JSONPath %q: %v", pathExpr, err)
+	}
+	nodes := path.Select(value)
+	if len(nodes) == 0 {
+		return fail("%s JSONPath %q did not match any value", sourceLabel, pathExpr)
+	}
+	if len(nodes) != 1 {
+		return fail("%s JSONPath %q matched %d values; equals requires exactly one", sourceLabel, pathExpr, len(nodes))
+	}
+
+	expected, err := parseJSONValue(expectedRaw)
+	if err != nil {
+		return fail("expected JSON value is invalid: %v", err)
+	}
+
+	actual := nodes[0]
+	if !reflect.DeepEqual(actual, expected) {
+		return fail("%s JSONPath %q: expected %s, got %s", sourceLabel, pathExpr, formatJSON(expected), formatJSON(actual))
+	}
+	return pass()
+}
+
+func parseJSONValue(raw string) (any, error) {
+	var value any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &value); err != nil {
+		return nil, err
+	}
+	return value, nil
+}
+
+func formatJSON(value any) string {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Sprintf("%v", value)
+	}
+	return string(data)
+}
+
+func selectOutputJSONSource(wr *executor.WhenResult, source string) string {
+	switch source {
+	case "stdout":
+		return wr.Stdout
+	case "stderr":
+		return wr.Stderr
+	default:
+		return wr.CombinedOutput()
+	}
 }
 
 // unescapeString replaces \" with " and \\ with \ in a captured assertion string.
@@ -344,22 +534,20 @@ var (
 	reExitCodeIs    = regexp.MustCompile(`^exit code is (\d+)$`)
 	reExitCodeIsNot = regexp.MustCompile(`^exit code is not (\d+)$`)
 
-	// output contains / stdout contains / stderr contains / does not contain
-	// Capture group allows \" escape sequences.
 	reOutputContains = regexp.MustCompile(`^(?:output|stdout|stderr)(?: does not)? contains? "((?:[^"\\]|\\.)*)"`)
+	reOutputMatches  = regexp.MustCompile(`^(?:output)(?: does not)? matches? pattern "((?:[^"\\]|\\.)*)"`)
 
-	// output matches pattern / does not match pattern
-	reOutputMatches = regexp.MustCompile(`^(?:output)(?: does not)? matches? pattern "((?:[^"\\]|\\.)*)"`)
+	reOutputJSONExists       = regexp.MustCompile(`^(output|stdout|stderr) as JSON at path "((?:[^"\\]|\\.)*)" exists$`)
+	reOutputJSONEqualsBlock  = regexp.MustCompile(`^(output|stdout|stderr) as JSON at path "((?:[^"\\]|\\.)*)" equals:$`)
+	reOutputJSONEqualsInline = regexp.MustCompile(`^(output|stdout|stderr) as JSON at path "((?:[^"\\]|\\.)*)" equals (.+)$`)
 
-	// file "X" exists / does not exist
-	reFileExists = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"`)
+	reFileExists = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"(?:(?: does not)? exist[s]?)$`)
+	reDirExists  = regexp.MustCompile(`^(?:the )?directory "((?:[^"\\]|\\.)*)"(?:(?: does not)? exist[s]?)`)
 
-	// directory "X" exists / does not exist
-	reDirExists = regexp.MustCompile(`^(?:the )?directory "((?:[^"\\]|\\.)*)"(?:(?: does not)? exist[s]?)`)
-
-	// file "X" [does not] contains: <block>
 	reFileContainsBlock = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"` + `(?: does not)? contains:$`)
+	reFileContains      = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"` + `(?: does not)? contains "((?:[^"\\]|\\.)*)"`)
 
-	// file "X" [does not] contains "Y"
-	reFileContains = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"` + `(?: does not)? contains "((?:[^"\\]|\\.)*)"`)
+	reFileJSONExists       = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)" as JSON at path "((?:[^"\\]|\\.)*)" exists$`)
+	reFileJSONEqualsBlock  = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)" as JSON at path "((?:[^"\\]|\\.)*)" equals:$`)
+	reFileJSONEqualsInline = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)" as JSON at path "((?:[^"\\]|\\.)*)" equals (.+)$`)
 )

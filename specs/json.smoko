@@ -1,0 +1,34 @@
+Feature: JSON Assertions
+  Testing JSONPath assertions against output streams and files
+
+  Image: alpine:latest
+
+  Scenario: Assert JSON on stdout
+    Given a file "stdout.json" with content:
+      {"user":{"name":"Alice","active":true}}
+    When I run "cat stdout.json"
+    Then exit code is 0
+    Then output as JSON at path "$.user.name" equals "Alice"
+    Then stdout as JSON at path "$.user.active" equals true
+
+  Scenario: Assert JSON on stderr
+    Given a file "stderr.json" with content:
+      {"ok":true}
+    When I run "sh -c 'cat stderr.json >&2'"
+    Then exit code is 0
+    Then stderr as JSON at path "$.ok" exists
+    Then stderr as JSON at path "$.ok" equals true
+
+  Scenario: Assert JSON file content
+    Given a file "result.json" with content:
+      {
+        "items": [1, 2, 3],
+        "meta": {
+          "count": 3
+        }
+      }
+    When I run "cat result.json"
+    Then exit code is 0
+    Then file "result.json" as JSON at path "$.meta.count" equals 3
+    Then file "result.json" as JSON at path "$.items" equals:
+      [1, 2, 3]

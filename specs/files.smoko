@@ -21,3 +21,12 @@ Feature: File Operations
     When I run "ls -d mydir"
     Then exit code is 0
     Then directory "mydir" exists
+
+  Scenario: Generate file from setup command
+    Given a file "input.txt" with content:
+      generated from setup
+    Given I run "cp input.txt output.txt"
+    When I run "cat output.txt"
+    Then exit code is 0
+    Then output contains "generated from setup"
+    Then file "output.txt" exists

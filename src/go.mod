@@ -7,6 +7,7 @@ require (
 	github.com/docker/docker v27.5.1+incompatible
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
+	github.com/theory/jsonpath v0.11.0
 )
 
 require (

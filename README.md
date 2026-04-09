@@ -93,9 +93,12 @@ Given a file "path/to/file.txt" with content:
   multiline content here
 Given a file "path/to/file.txt" exists
 Given the directory "path/to/dir" exists
+Given I run "cp source.txt target.txt"
 Given an empty working directory
 Given environment variable "VAR" is set to "value"
 ```
+
+`Given I run "..."` executes inside `/smoko-work`, sources `.smoko_env` if present, and fails the scenario immediately on a non-zero exit code.
 
 ### When Steps (Action)
 
@@ -119,12 +122,21 @@ Then output matches pattern "regex.*pattern"
 Then stdout contains "message"
 Then stderr contains "error"
 
+# JSON assertions
+Then output as JSON at path "$.user.name" exists
+Then stdout as JSON at path "$.ok" equals true
+Then file "result.json" as JSON at path "$.items[0].id" equals 123
+Then file "result.json" as JSON at path "$.items" equals:
+  [1, 2, 3]
+
 # File system
 Then file "path/to/file" exists
 Then file "path/to/file" does not exist
 Then file "path/to/file" contains "content"
 Then directory "path/to/dir" exists
 ```
+
+JSON `equals` compares parsed JSON values, not strings. Use JSON literals such as `"Alice"`, `3`, `true`, `null`, or block JSON for arrays and objects.
 
 ### Background (Optional)
 
@@ -147,7 +159,7 @@ Create a `.smokorc` file in the project root:
 
 ```toml
 image   = "myimage:latest"  # Default Docker image
-timeout = 30                # Seconds per When step
+timeout = 30                # Seconds per setup/action command
 ```
 
 Or use CLI flags to override:
@@ -161,7 +173,7 @@ smoko run test.smoko --image ubuntu:latest --timeout 60 --verbose --fail-fast
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--image` | (none) | Docker image to use (overrides .smokorc and inline Image:) |
-| `--timeout` | 30 | Seconds to wait for each When step |
+| `--timeout` | 30 | Seconds to wait for each setup/action command |
 | `--verbose` | false | Print stdout/stderr even for passing scenarios |
 | `--fail-fast` | false | Stop after the first failed scenario |
 | `--parallel` | 1 | Number of scenarios to run concurrently (0 = auto) |
@@ -258,6 +270,32 @@ Feature: Configuration Management
     When I run "app --config .env"
     Then exit code is 0
     Then output matches pattern "debug.*false"
+```
+
+### Example 3: JSON Output Assertions
+
+```gherkin
+Feature: JSON API CLI
+  Scenario: Read nested JSON output
+    Given a file "stdout.json" with content:
+      {"user":{"name":"Alice","active":true}}
+    When I run "cat stdout.json"
+    Then exit code is 0
+    Then output as JSON at path "$.user.name" equals "Alice"
+    Then output as JSON at path "$.user.active" equals true
+```
+
+### Example 4: JSON File Assertions
+
+```gherkin
+Feature: JSON File Generation
+  Scenario: Inspect generated JSON file
+    Given a file "result.json" with content:
+      {"items":[1,2,3]}
+    When I run "cat result.json"
+    Then exit code is 0
+    Then file "result.json" as JSON at path "$.items" equals:
+      [1, 2, 3]
 ```
 
 ## License

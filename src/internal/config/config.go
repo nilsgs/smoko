@@ -11,7 +11,7 @@ import (
 // Config holds values from a .smokorc file.
 type Config struct {
 	Image   string `toml:"image"`
-	Timeout int    `toml:"timeout"` // seconds per When step; 0 means use default
+	Timeout int    `toml:"timeout"` // seconds per setup/action command; 0 means use default
 }
 
 const DefaultTimeout = 30
