@@ -14,7 +14,7 @@ type Config struct {
 	Timeout int    `toml:"timeout"` // seconds per setup/action command; 0 means use default
 }
 
-const DefaultTimeout = 30
+const DefaultTimeout = 1
 
 // Load reads .smokorc from dir. If the file is absent it returns a zero-value
 // Config (not an error).

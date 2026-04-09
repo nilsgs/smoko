@@ -57,20 +57,20 @@ func runCmd() *cobra.Command {
 		Short: "Run .smoko test files",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTests(args[0], image, timeout, verbose, failFast, parallel)
+			return runTests(args[0], image, timeout, cmd.Flags().Changed("timeout"), verbose, failFast, parallel)
 		},
 	}
 
 	cmd.Flags().StringVar(&image, "image", "", "Docker image to use (overrides .smokorc and inline Image:)")
-	cmd.Flags().IntVar(&timeout, "timeout", 0, "Seconds to wait for each setup/action command (default: 30)")
+	cmd.Flags().IntVar(&timeout, "timeout", config.DefaultTimeout, "Seconds to wait for each setup/action command")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Print stdout/stderr even for passing scenarios")
 	cmd.Flags().BoolVar(&failFast, "fail-fast", false, "Stop after the first failed scenario")
-	cmd.Flags().IntVar(&parallel, "parallel", 1, "Number of scenarios to run in parallel (0 = auto)")
+	cmd.Flags().IntVar(&parallel, "parallel", 0, "Number of scenarios to run in parallel (0 = auto)")
 
 	return cmd
 }
 
-func runTests(path, imageFlag string, timeoutFlag int, verbose, failFast bool, parallel int) error {
+func runTests(path, imageFlag string, timeoutFlag int, timeoutFlagSet bool, verbose, failFast bool, parallel int) error {
 	// Determine working dir for config
 	wd, err := os.Getwd()
 	if err != nil {
@@ -82,20 +82,10 @@ func runTests(path, imageFlag string, timeoutFlag int, verbose, failFast bool, p
 	}
 
 	// Resolve timeout
-	timeoutSec := config.DefaultTimeout
-	if cfg.Timeout > 0 {
-		timeoutSec = cfg.Timeout
-	}
-	if timeoutFlag > 0 {
-		timeoutSec = timeoutFlag
-	}
-	timeout := time.Duration(timeoutSec) * time.Second
+	timeout := resolveTimeout(cfg, timeoutFlag, timeoutFlagSet)
 
 	// Resolve parallelism
-	workers := parallel
-	if workers <= 0 {
-		workers = runtime.GOMAXPROCS(0)
-	}
+	workers := resolveWorkerCount(parallel)
 
 	// Collect .smoko files
 	files, err := collectFiles(path)
@@ -240,6 +230,24 @@ func runTests(path, imageFlag string, timeoutFlag int, verbose, failFast bool, p
 		return fmt.Errorf("tests failed")
 	}
 	return nil
+}
+
+func resolveTimeout(cfg config.Config, timeoutFlag int, timeoutFlagSet bool) time.Duration {
+	timeoutSec := config.DefaultTimeout
+	if cfg.Timeout > 0 {
+		timeoutSec = cfg.Timeout
+	}
+	if timeoutFlagSet && timeoutFlag > 0 {
+		timeoutSec = timeoutFlag
+	}
+	return time.Duration(timeoutSec) * time.Second
+}
+
+func resolveWorkerCount(parallel int) int {
+	if parallel <= 0 {
+		return runtime.GOMAXPROCS(0)
+	}
+	return parallel
 }
 
 func runScenario(ctx context.Context, dc *docker.Client, feat parser.Feature, sc parser.Scenario, img string, timeout time.Duration) reporter.ScenarioReport {

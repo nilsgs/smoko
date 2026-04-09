@@ -159,24 +159,26 @@ Create a `.smokorc` file in the project root:
 
 ```toml
 image   = "myimage:latest"  # Default Docker image
-timeout = 30                # Seconds per setup/action command
+timeout = 1                 # Seconds per setup/action command
 ```
 
 Or use CLI flags to override:
 
 ```bash
-smoko run test.smoko --image ubuntu:latest --timeout 60 --verbose --fail-fast
+smoko run test.smoko --image ubuntu:latest --parallel 0 --timeout 5 --verbose --fail-fast
 ```
+
+Defaults are tuned for faster feedback: `--parallel` uses auto mode by default and `--timeout` defaults to `1` second unless `.smokorc` or an explicit flag overrides it.
 
 ## CLI Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--image` | (none) | Docker image to use (overrides .smokorc and inline Image:) |
-| `--timeout` | 30 | Seconds to wait for each setup/action command |
+| `--timeout` | 1 | Seconds to wait for each setup/action command |
 | `--verbose` | false | Print stdout/stderr even for passing scenarios |
 | `--fail-fast` | false | Stop after the first failed scenario |
-| `--parallel` | 1 | Number of scenarios to run concurrently (0 = auto) |
+| `--parallel` | 0 | Number of scenarios to run concurrently (0 = auto) |
 
 ## Project Structure
 

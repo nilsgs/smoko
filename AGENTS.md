@@ -123,7 +123,7 @@ Exit code: 0 (pass), 1 (fail), 2 (error)
 - All paths are absolute from `/smoko-work` (or prefixed with it)
 - Commands are wrapped: `source .smoko_env; <user-command>` to inject env vars
 - File writes use tar archives (no host mounts for isolation)
-- Exit codes are captured; timeouts default to 30s (configurable)
+- Exit codes are captured; timeouts default to 1s (configurable)
 
 ## Extending the Tool
 

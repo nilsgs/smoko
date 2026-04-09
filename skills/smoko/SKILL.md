@@ -251,16 +251,24 @@ Scenario: CLI writes a JSON file
 - If a JSON assertion fails, check whether the source is valid JSON, whether the JSONPath is valid, and whether `equals` matched exactly one node.
 - If shared setup is repeated across scenarios, move it into `Background`.
 - If the setup is imperative shell work, prefer `Given I run "..."` over abusing `When`.
+- If a scenario times out, remember the default timeout is `1` second and increase `--timeout` or `.smokorc` only for the slow path.
+
+## Performance
+
+- Prefer `smoko run specs/ --parallel 0` for normal runs so Smoko auto-sizes concurrency.
+- Keep the default `1` second timeout unless the command or image is genuinely slow.
+- Use `Background` for repeated setup instead of duplicating expensive `Given` steps in every scenario.
+- Prefer file-based setup steps over long shell setup sequences when both express the same intent.
 
 ## Commands
 
 ```bash
 smoko run test.smoko
 smoko run specs/
-smoko run specs/ --parallel 4
+smoko run specs/ --parallel 0
 smoko run test.smoko --image alpine:latest
 smoko run test.smoko --verbose
 smoko run test.smoko --fail-fast
 ```
 
-`timeout` in `.smokorc` or `--timeout` applies to setup and action commands.
+`timeout` in `.smokorc` or `--timeout` applies to setup and action commands. The built-in default is `1` second.
