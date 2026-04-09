@@ -1,6 +1,6 @@
 ---
 name: smoko
-description: "Write, review, and debug Smoko `.smoko` smoke tests for CLI applications. Use when Codex needs to create or update Given/When/Then scenarios, explain supported DSL clauses, add assertions, structure shared setup with Background, or troubleshoot Smoko test failures running in Docker containers."
+description: "Write, review, and debug Smoko `.smoko` smoke tests for CLI applications. Use when the agent needs to create or update Given/When/Then scenarios, explain supported DSL clauses, add assertions, structure shared setup with Background, or troubleshoot Smoko test failures running in Docker containers."
 ---
 
 # Smoko
