@@ -35,10 +35,13 @@ make test            # unit tests in Docker
   1. Collects environment variables from Given steps
   2. Creates container with those env vars
   3. Runs Given steps — **batched** via `RunGivenSteps`: file writes go into one tar upload, dir creation uses separate exec only when needed
-  4. Captures stdout from `Given I run` steps and writes captured variables to `.smoko_env`
-  5. Runs When step (captures stdout/stderr/exit code)
-  6. Evaluates Then/And assertions
-- `RunGivenSteps(ctx, dc, containerID, steps, timeout, env)` is the preferred API; `RunGiven` (single step) is kept for compatibility
+  4. Tracks the effective working directory (starts at `/smoko-work`; updated by `Given the working directory is` steps)
+  5. Captures stdout from `Given I run` steps and writes captured variables to `.smoko_env`
+  6. Runs When step from the effective working directory (captures stdout/stderr/exit code)
+  7. Evaluates Then/And assertions
+- `RunGivenSteps(ctx, dc, containerID, steps, timeout, env)` returns `(workdir string, error)` — the effective working directory after all Given steps; preferred API
+- `RunGiven` (single step) is kept for compatibility, also returns `(string, error)`
+- `RunWhen(ctx, dc, containerID, step, workdir, timeout)` accepts the effective workdir returned by `RunGivenSteps`
 - Variable capture: `And I save output/JSON path/pattern as $VAR` steps append to `.smoko_env`
 - File operations are done via Docker exec/tar, not host mounts
 - Fuzzy hints: unknown Given/When steps suggest closest known pattern via `internal/hints`
@@ -85,11 +88,12 @@ For each Scenario (optionally parallel via --parallel N):
   2. docker.CreateContainer(image, env)
   3. Batch all Given file writes → docker.WriteFiles (single tar)
   4. Run mkdir for explicit directory steps
-  5. Run Given I run steps; for each I save step → append var to .smoko_env
-  6. Run Scenario When step → capture WhenResult
-  7. Batch Then filesystem checks → docker.BatchFSCheck (single exec)
-  8. Evaluate all Then steps against WhenResult + FSCheck results
-  9. docker.RemoveContainer
+  5. On "Given the working directory is": exec `test -d` in container; update effective workdir
+  6. Run Given I run steps (using effective workdir); for each I save step → append var to .smoko_env
+  7. Run Scenario When step (using effective workdir) → capture WhenResult
+  8. Batch Then filesystem checks → docker.BatchFSCheck (single exec)
+  9. Evaluate all Then steps against WhenResult + FSCheck results
+  10. docker.RemoveContainer
     ↓
 Reporter aggregates & prints results (thread-safe)
     ↓
@@ -105,7 +109,7 @@ Exit code: 0 (pass), 1 (fail), 2 (error)
 - `internal/parser/lexer.go`: Tokenization with stateful block detection
 - `internal/parser/parser.go`: Recursive-descent parser
 - `internal/docker/docker.go`: Docker SDK wrapper; includes `WriteFiles` (batched tar upload), `BatchFSCheck` (batched filesystem checks), `PullIfMissing` (with sync.Map cache)
-- `internal/executor/executor.go`: Given/When handlers; `RunGivenSteps` batches file writes and handles variable capture; `knownGivenPatterns`/`knownWhenPatterns` for fuzzy hints
+- `internal/executor/executor.go`: Given/When handlers; `RunGivenSteps` batches file writes, handles variable capture, tracks effective workdir and returns it; `RunWhen` accepts workdir; `knownGivenPatterns`/`knownWhenPatterns` for fuzzy hints
 - `internal/assertions/assertions.go`: Then assertion evaluators; `EvaluateAll` batches filesystem checks; regex cache via sync.Map; `knownThenPatterns` for fuzzy hints
 - `internal/hints/hints.go`: `Suggest()` function using Levenshtein distance on normalised step text
 - `internal/reporter/reporter.go`: Output formatting with colors; thread-safe `Add()` for parallel use
@@ -114,15 +118,17 @@ Exit code: 0 (pass), 1 (fail), 2 (error)
 
 - `internal/parser/parser_test.go`: Parser unit tests
 - `internal/config/config_test.go`: Config unit tests
-- `specs/*.smoko`: Integration fixtures (basic.smoko, files.smoko, etc.)
+- `specs/*.smoko`: Integration fixtures (basic.smoko, files.smoko, workdir.smoko, etc.)
 
 ## Common Patterns
 
 ### Adding a New Given Step
 
 1. Define a regex pattern in `executor.go`: `var reNewPattern = regexp.MustCompile(...)`
-2. Add a case in `RunGiven()` to match and execute
-3. Example: `Given the directory "X" exists` → `dc.MakeDir(ctx, containerID, path)`
+2. Add a case in `classifyGivenStep()` to match and return a `givenAction` with the appropriate `givenKind`
+3. If the kind requires a new op type, add a `givenOpKind` constant and handle it in `buildGivenOps()` and `RunGivenSteps()`
+4. Add the step pattern string to `knownGivenPatterns` for fuzzy hints
+5. Example: `Given the directory "X" exists` → `givenDir` kind → `givenOpMakeDir` → `dc.MakeDir(ctx, containerID, path)`
 
 ### Adding a New Then Assertion
 
@@ -179,6 +185,10 @@ Exit code: 0 (pass), 1 (fail), 2 (error)
 **Issue:** Environment variables not visible in When step
 - Verify syntax: `Given environment variable "NAME" is set to "value"`
 - Check that the container has `/smoko-work/.smoko_env` written
+
+**Issue:** CLI tool can't find project root / must run from a subdirectory
+- Use `Given the working directory is "path/to/subdir"` before the `When` step
+- The directory must already exist; create it first with `Given the directory "..." exists`
 
 ## Performance Considerations
 

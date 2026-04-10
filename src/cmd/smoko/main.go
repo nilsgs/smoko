@@ -300,7 +300,8 @@ func runScenario(ctx context.Context, dc *docker.Client, feat parser.Feature, sc
 	}
 
 	// Run Given steps in declared order, batching adjacent file writes.
-	if err := executor.RunGivenSteps(ctx, dc, containerID, allGiven, timeout, env); err != nil {
+	workdir, err := executor.RunGivenSteps(ctx, dc, containerID, allGiven, timeout, env)
+	if err != nil {
 		rep.Error = err
 		return rep
 	}
@@ -316,7 +317,7 @@ func runScenario(ctx context.Context, dc *docker.Client, feat parser.Feature, sc
 
 	var whenResult *executor.WhenResult
 	if whenStep != nil {
-		wr, err := executor.RunWhen(ctx, dc, containerID, *whenStep, timeout)
+		wr, err := executor.RunWhen(ctx, dc, containerID, *whenStep, workdir, timeout)
 		if err != nil {
 			rep.Error = fmt.Errorf("When %q: %w", whenStep.Text, err)
 			return rep

@@ -1,0 +1,30 @@
+Feature: Working Directory
+  Testing Given the working directory is "..."
+
+  Image: alpine:latest
+
+  Scenario: Run command from subdirectory
+    Given the directory "src/App" exists
+    Given the working directory is "src/App"
+    When I run "pwd"
+    Then exit code is 0
+    Then output contains "/smoko-work/src/App"
+
+  Scenario: Then assertions still use scenario root paths
+    Given the directory "sub" exists
+    Given a file "sub/data.txt" with content:
+      hello from sub
+    Given the working directory is "sub"
+    When I run "cat data.txt"
+    Then exit code is 0
+    Then output contains "hello from sub"
+    Then file "sub/data.txt" exists
+
+  Scenario: Given I run also uses working directory
+    Given the directory "project" exists
+    Given the working directory is "project"
+    Given I run "touch setup.txt"
+    When I run "ls"
+    Then exit code is 0
+    Then output contains "setup.txt"
+    Then file "project/setup.txt" exists

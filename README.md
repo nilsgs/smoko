@@ -156,12 +156,15 @@ Given a file "path/to/file.txt" with content:
   multiline content here
 Given a file "path/to/file.txt" exists
 Given the directory "path/to/dir" exists
+Given the working directory is "path/to/subdir"
 Given I run "cp source.txt target.txt"
 Given an empty working directory
 Given environment variable "VAR" is set to "value"
 ```
 
-`Given I run "..."` executes inside `/smoko-work`, sources `.smoko_env` if present, and fails the scenario immediately on a non-zero exit code.
+`Given I run "..."` executes inside the current working directory (default `/smoko-work`, or whatever `Given the working directory is` set), sources `.smoko_env` if present, and fails the scenario immediately on a non-zero exit code.
+
+`Given the working directory is "path"` sets the working directory for all subsequent `Given I run` and `When I run` steps in the scenario. The path is relative to the scenario root (`/smoko-work`). The directory must already exist; if not, the scenario fails immediately with a clear error. `Then` file/directory assertions always use paths relative to `/smoko-work` regardless of this step.
 
 #### Capturing output as variables
 
@@ -337,7 +340,26 @@ Feature: Configuration Management
     Then output matches pattern "debug.*false"
 ```
 
-### Example 3: JSON Output Assertions
+### Example 3: Working Directory
+
+Use `Given the working directory is "..."` when the tool under test needs to run from a subdirectory (e.g., a CLI that walks up to find a project root):
+
+```gherkin
+Feature: Project Detection
+  Scenario: Detects project root from nested directory
+    Given the directory "src/App" exists
+    Given a file "src/App/App.csproj" with content:
+      <Project Sdk="Microsoft.NET.Sdk" />
+    Given the working directory is "src/App"
+    When I run "mycli status"
+    Then exit code is 0
+    Then output contains "project root found"
+    Then file "src/App/App.csproj" exists
+```
+
+`Then` file paths remain relative to `/smoko-work` (the scenario root), not the working directory.
+
+### Example 4: JSON Output Assertions
 
 ```gherkin
 Feature: JSON API CLI
@@ -350,7 +372,7 @@ Feature: JSON API CLI
     Then output as JSON at path "$.user.active" equals true
 ```
 
-### Example 4: JSON File Assertions
+### Example 5: JSON File Assertions
 
 ```gherkin
 Feature: JSON File Generation

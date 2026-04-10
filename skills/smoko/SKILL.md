@@ -63,6 +63,32 @@ Given a file "path/to/file.txt" exists
 Given the directory "path/to/dir" exists
 ```
 
+### Set the working directory
+
+```gherkin
+Given the working directory is "path/to/subdir"
+```
+
+Behavior:
+- Changes the working directory for all subsequent `Given I run` and `When I run` steps in the scenario.
+- The path is relative to the scenario root (`/smoko-work`); resolved as `/smoko-work/<path>`.
+- The directory must already exist; if not, the scenario fails immediately with a clear error.
+- Resets to `/smoko-work` automatically at the start of each new scenario.
+- `Then` file and directory assertions always use paths relative to `/smoko-work`, regardless of this step.
+
+Use this step when the CLI under test needs to run from a subdirectory (e.g., a tool that walks up to find a project root):
+
+```gherkin
+Scenario: Detects repo root from nested directory
+  Given the directory "src/App" exists
+  Given a file "src/App/App.csproj" with content:
+    <Project Sdk="Microsoft.NET.Sdk" />
+  Given the working directory is "src/App"
+  When I run "mycli status"
+  Then exit code is 0
+  Then file "src/App/App.csproj" exists
+```
+
 ### Set an environment variable
 
 ```gherkin
@@ -231,6 +257,21 @@ Then directory "path/to/dir" does not exist
 
 ## Patterns
 
+### Working directory for directory-aware CLIs
+
+Use `Given the working directory is "..."` instead of `sh -c 'cd ... && ...'` in the `When` step:
+
+```gherkin
+# Before — embeds shell logic in the action step, POSIX-only:
+When I run "sh -c 'cd src/App && mycli bump --major'"
+
+# After — clean Given/When/Then separation:
+Given the working directory is "src/App"
+When I run "mycli bump --major"
+```
+
+`Then` file paths remain relative to `/smoko-work` (the scenario root), not the working directory.
+
 ### Sequential setup with variable capture
 
 Use `Given I run` + `And I save` to chain setup steps that depend on each other's output:
@@ -321,6 +362,7 @@ Scenario: CLI respects environment variables
 
 ## Debugging guidance
 
+- If a `Given the working directory is` step fails, the directory does not yet exist in the container — add a `Given the directory "..." exists` step before it.
 - If a `Given` step fails before `When`, inspect the setup command or path assumptions first.
 - If a file assertion fails, remember paths are relative to `/smoko-work` unless explicitly absolute.
 - If regex assertions fail, verify the step uses `matches pattern`, not just `matches`.

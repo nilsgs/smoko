@@ -47,43 +47,58 @@ func WriteEnvFile(ctx context.Context, dc dockerRunner, containerID string, vars
 // operations only when they are adjacent so the declared order is preserved.
 // env holds the initial environment variables; any captured variables are
 // appended and written to .smoko_env so subsequent steps can use them.
-func RunGivenSteps(ctx context.Context, dc dockerRunner, containerID string, steps []parser.Step, timeout time.Duration, env []string) error {
+// Returns the effective working directory after all steps have run (starts at
+// docker.WorkDir() and may be updated by "Given the working directory is" steps).
+func RunGivenSteps(ctx context.Context, dc dockerRunner, containerID string, steps []parser.Step, timeout time.Duration, env []string) (string, error) {
 	ops, err := buildGivenOps(steps)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	allEnv := append([]string(nil), env...)
+	workdir := docker.WorkDir()
 
 	for _, op := range ops {
-		if op.kind == givenOpRunCommand {
-			stdout, err := runGivenCommandCapture(ctx, dc, containerID, op.command, timeout)
+		switch op.kind {
+		case givenOpSetWorkdir:
+			absPath := docker.WorkDir() + "/" + strings.TrimPrefix(op.path, "/")
+			_, _, code, err := dc.ExecCommand(ctx, containerID, workdir, "test -d "+docker.ShellQuote(absPath), "", 5*time.Second)
 			if err != nil {
-				return fmt.Errorf("Given %q: %w", op.stepText, err)
+				return "", fmt.Errorf("Given %q: %w", op.stepText, err)
+			}
+			if code != 0 {
+				return "", fmt.Errorf("Given %q: directory %q does not exist", op.stepText, op.path)
+			}
+			workdir = absPath
+		case givenOpRunCommand:
+			stdout, err := runGivenCommandCapture(ctx, dc, containerID, op.command, workdir, timeout)
+			if err != nil {
+				return "", fmt.Errorf("Given %q: %w", op.stepText, err)
 			}
 			for _, cap := range op.captures {
 				value, err := extractCaptureValue(cap, stdout)
 				if err != nil {
-					return fmt.Errorf("Given %q: %w", cap.stepText, err)
+					return "", fmt.Errorf("Given %q: %w", cap.stepText, err)
 				}
 				allEnv = append(allEnv, cap.varName+"="+value)
 				if err := WriteEnvFile(ctx, dc, containerID, allEnv); err != nil {
-					return fmt.Errorf("write env after capture: %w", err)
+					return "", fmt.Errorf("write env after capture: %w", err)
 				}
 			}
-		} else {
+		default:
 			if err := executeGivenOp(ctx, dc, containerID, op, timeout); err != nil {
-				return err
+				return "", err
 			}
 		}
 	}
 
-	return nil
+	return workdir, nil
 }
 
 // RunGiven executes a single Given step against the container.
 // Prefer RunGivenSteps for ordered, batched execution.
-func RunGiven(ctx context.Context, dc dockerRunner, containerID string, step parser.Step, timeout time.Duration, env []string) error {
+// Returns the effective working directory after the step.
+func RunGiven(ctx context.Context, dc dockerRunner, containerID string, step parser.Step, timeout time.Duration, env []string) (string, error) {
 	return RunGivenSteps(ctx, dc, containerID, []parser.Step{step}, timeout, env)
 }
 
@@ -103,7 +118,8 @@ func CollectEnvVars(steps []parser.Step) []string {
 }
 
 // RunWhen executes a When step and returns the captured result.
-func RunWhen(ctx context.Context, dc dockerRunner, containerID string, step parser.Step, timeout time.Duration) (*WhenResult, error) {
+// workdir is the effective working directory (as set by "Given the working directory is").
+func RunWhen(ctx context.Context, dc dockerRunner, containerID string, step parser.Step, workdir string, timeout time.Duration) (*WhenResult, error) {
 	text := step.Text
 
 	var command, stdin string
@@ -128,7 +144,7 @@ func RunWhen(ctx context.Context, dc dockerRunner, containerID string, step pars
 		return nil, fmt.Errorf("unknown When step: %q", text)
 	}
 
-	stdout, stderr, exitCode, err := dc.ExecCommand(ctx, containerID, docker.WorkDir(), wrapCommand(command), stdin, timeout)
+	stdout, stderr, exitCode, err := dc.ExecCommand(ctx, containerID, workdir, wrapCommand(command), stdin, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("when step exec: %w", err)
 	}
@@ -163,7 +179,8 @@ const (
 	givenFile
 	givenDir
 	givenRun
-	givenSave // I save output/JSON path/pattern as $VAR
+	givenSave       // I save output/JSON path/pattern as $VAR
+	givenSetWorkdir // the working directory is "path"
 )
 
 type captureKind int
@@ -197,6 +214,7 @@ const (
 	givenOpWriteFiles givenOpKind = iota
 	givenOpMakeDir
 	givenOpRunCommand
+	givenOpSetWorkdir
 )
 
 type givenOp struct {
@@ -240,6 +258,13 @@ func buildGivenOps(steps []parser.Step) ([]givenOp, error) {
 			flushFiles()
 			ops = append(ops, givenOp{
 				kind:     givenOpMakeDir,
+				stepText: action.stepText,
+				path:     action.path,
+			})
+		case givenSetWorkdir:
+			flushFiles()
+			ops = append(ops, givenOp{
+				kind:     givenOpSetWorkdir,
 				stepText: action.stepText,
 				path:     action.path,
 			})
@@ -290,6 +315,14 @@ func classifyGivenStep(step parser.Step) (givenAction, error) {
 	if m := reDirExists.FindStringSubmatch(text); m != nil {
 		return givenAction{
 			kind:     givenDir,
+			stepText: text,
+			path:     m[1],
+		}, nil
+	}
+
+	if m := reSetWorkdir.FindStringSubmatch(text); m != nil {
+		return givenAction{
+			kind:     givenSetWorkdir,
 			stepText: text,
 			path:     m[1],
 		}, nil
@@ -372,6 +405,7 @@ var knownGivenPatterns = []string{
 	`I save output as $VAR`,
 	`I save JSON path "$.field" as $VAR`,
 	`I save pattern "regex" as $VAR`,
+	`the working directory is "path"`,
 }
 
 func executeGivenOp(ctx context.Context, dc dockerRunner, containerID string, op givenOp, timeout time.Duration) error {
@@ -384,17 +418,13 @@ func executeGivenOp(ctx context.Context, dc dockerRunner, containerID string, op
 		if err := dc.MakeDir(ctx, containerID, op.path); err != nil {
 			return fmt.Errorf("Given %q: %w", op.stepText, err)
 		}
-	case givenOpRunCommand:
-		if _, err := runGivenCommandCapture(ctx, dc, containerID, op.command, timeout); err != nil {
-			return fmt.Errorf("Given %q: %w", op.stepText, err)
-		}
 	}
 
 	return nil
 }
 
-func runGivenCommandCapture(ctx context.Context, dc dockerRunner, containerID, command string, timeout time.Duration) (string, error) {
-	stdout, stderr, exitCode, err := dc.ExecCommand(ctx, containerID, docker.WorkDir(), wrapCommand(command), "", timeout)
+func runGivenCommandCapture(ctx context.Context, dc dockerRunner, containerID, command, workdir string, timeout time.Duration) (string, error) {
+	stdout, stderr, exitCode, err := dc.ExecCommand(ctx, containerID, workdir, wrapCommand(command), "", timeout)
 	if err != nil {
 		return "", fmt.Errorf("setup command %q: %w", command, err)
 	}
@@ -427,6 +457,7 @@ var (
 	reEmptyWorkDir    = regexp.MustCompile(`^an empty working directory$`)
 	reEnvVar          = regexp.MustCompile(`^environment variable "([^"]+)" is set to "([^"]*)"$`)
 	reGivenRun        = regexp.MustCompile(`^I run "([^"]+)"$`)
+	reSetWorkdir      = regexp.MustCompile(`^the working directory is "([^"]+)"$`)
 
 	reSaveOutput   = regexp.MustCompile(`^I save output as \$([A-Za-z_][A-Za-z0-9_]*)$`)
 	reSaveJSONPath = regexp.MustCompile(`^I save JSON path "((?:[^"\\]|\\.)*)" as \$([A-Za-z_][A-Za-z0-9_]*)$`)
