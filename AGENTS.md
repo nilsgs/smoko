@@ -1,6 +1,6 @@
 # Smoko
 
-Smoke testing tool for CLI apps. BDD-style `.smoko` DSL executed in isolated Docker containers. Module: `github.com/nskut/smoko`. For DSL usage and examples, see [`skills/smoko/SKILL.md`](skills/smoko/SKILL.md).
+Smoke testing tool for CLI apps. BDD-style `.smoko` DSL executed in isolated Docker containers. Module: `github.com/nskut/smoko`.
 
 ## Commands
 

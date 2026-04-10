@@ -5,7 +5,7 @@ description: "Write, review, and debug Smoko `.smoko` smoke tests for CLI applic
 
 # Smoko
 
-Use this guide to write correct Smoko scenarios and stay within the DSL the tool actually supports. For repository architecture and extension patterns, see [`AGENTS.md`](../../AGENTS.md).
+Use this guide to write correct Smoko scenarios and stay within the DSL the tool actually supports.
 
 ## Core model
 
