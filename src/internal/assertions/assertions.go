@@ -377,7 +377,7 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 	}
 
 	if m := reOutputContains.FindStringSubmatch(text); m != nil {
-		negate := strings.Contains(text, "does not contain")
+		negate := strings.Contains(text, "does not contain") || strings.Contains(text, "should not contain")
 		needle := unescapeString(m[1])
 		haystack := combined(wr, text)
 		has := strings.Contains(haystack, needle)
@@ -768,7 +768,7 @@ var (
 	reExitCodeIs    = regexp.MustCompile(`^exit code is (\d+)$`)
 	reExitCodeIsNot = regexp.MustCompile(`^exit code is not (\d+)$`)
 
-	reOutputContains = regexp.MustCompile(`^(?:output|stdout|stderr)(?: does not)? contains? "((?:[^"\\]|\\.)*)"`)
+	reOutputContains = regexp.MustCompile(`^(?:the )?(?:output|stdout|stderr)(?: should not| does not| should)? contains? "((?:[^"\\]|\\.)*)"`)
 	reOutputMatches  = regexp.MustCompile(`^(?:output|stdout|stderr)(?: does not)? match(?:es)? pattern "((?:[^"\\]|\\.)*)"`)
 	reOutputEquals   = regexp.MustCompile(`^(?:output|stdout|stderr)(?: does not)? equals? "((?:[^"\\]|\\.)*)"$`)
 	reOutputEmpty    = regexp.MustCompile(`^(?:output|stdout|stderr) is (not )?empty$`)

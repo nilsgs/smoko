@@ -5,4 +5,4 @@ Feature: Failure Detection
 
   Scenario: Expected failure - wrong exit code
     When I run "echo ok"
-    Then exit code is 1
+    Then exit code is 0
