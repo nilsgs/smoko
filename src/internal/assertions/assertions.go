@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -67,10 +68,28 @@ func fail(format string, args ...interface{}) Result {
 	return Result{Pass: false, Message: fmt.Sprintf(format, args...)}
 }
 
+// expandVars replaces $VAR and ${VAR} references in s using the KEY=VALUE
+// pairs in env. Variables that are not present are replaced with empty string.
+func expandVars(s string, env []string) string {
+	if len(env) == 0 || !strings.ContainsRune(s, '$') {
+		return s
+	}
+	lookup := make(map[string]string, len(env))
+	for _, kv := range env {
+		eq := strings.IndexByte(kv, '=')
+		if eq >= 0 {
+			lookup[kv[:eq]] = kv[eq+1:]
+		}
+	}
+	return os.Expand(s, func(name string) string {
+		return lookup[name]
+	})
+}
+
 // EvaluateAll evaluates all Then steps, batching filesystem checks into a single
 // docker exec for performance. Steps that don't require filesystem access are
 // evaluated locally.
-func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResult, dc dockerReader, containerID string) []Result {
+func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResult, dc dockerReader, containerID string, env []string) []Result {
 	results := make([]Result, len(steps))
 
 	type checkRef struct {
@@ -96,7 +115,7 @@ func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResu
 
 		if m := reFileExists.FindStringSubmatch(text); m != nil {
 			negate := strings.Contains(text, "does not exist")
-			path := unescapeString(m[1])
+			path := expandVars(unescapeString(m[1]), env)
 			refs = append(refs, checkRef{
 				stepIdx:   i,
 				globalIdx: len(allChecks),
@@ -110,7 +129,7 @@ func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResu
 
 		if m := reDirExists.FindStringSubmatch(text); m != nil {
 			negate := strings.Contains(text, "does not exist")
-			path := unescapeString(m[1])
+			path := expandVars(unescapeString(m[1]), env)
 			refs = append(refs, checkRef{
 				stepIdx:   i,
 				globalIdx: len(allChecks),
@@ -124,7 +143,7 @@ func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResu
 
 		if m := reFileContainsBlock.FindStringSubmatch(text); m != nil {
 			negate := strings.Contains(text, "does not contain")
-			path := unescapeString(m[1])
+			path := expandVars(unescapeString(m[1]), env)
 			refs = append(refs, checkRef{
 				stepIdx:   i,
 				globalIdx: len(allChecks),
@@ -139,7 +158,7 @@ func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResu
 
 		if m := reFileContains.FindStringSubmatch(text); m != nil {
 			negate := strings.Contains(text, "does not contain")
-			path := unescapeString(m[1])
+			path := expandVars(unescapeString(m[1]), env)
 			refs = append(refs, checkRef{
 				stepIdx:   i,
 				globalIdx: len(allChecks),
@@ -153,7 +172,7 @@ func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResu
 		}
 
 		if m := reFileJSONExists.FindStringSubmatch(text); m != nil {
-			path := unescapeString(m[1])
+			path := expandVars(unescapeString(m[1]), env)
 			refs = append(refs, checkRef{
 				stepIdx:   i,
 				globalIdx: len(allChecks),
@@ -166,7 +185,7 @@ func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResu
 		}
 
 		if m := reFileJSONEqualsBlock.FindStringSubmatch(text); m != nil {
-			path := unescapeString(m[1])
+			path := expandVars(unescapeString(m[1]), env)
 			refs = append(refs, checkRef{
 				stepIdx:      i,
 				globalIdx:    len(allChecks),
@@ -180,7 +199,7 @@ func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResu
 		}
 
 		if m := reFileJSONEqualsInline.FindStringSubmatch(text); m != nil {
-			path := unescapeString(m[1])
+			path := expandVars(unescapeString(m[1]), env)
 			refs = append(refs, checkRef{
 				stepIdx:      i,
 				globalIdx:    len(allChecks),
@@ -195,7 +214,7 @@ func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResu
 
 		if m := reFileMatches.FindStringSubmatch(text); m != nil {
 			negate := strings.Contains(text, "does not match")
-			path := unescapeString(m[1])
+			path := expandVars(unescapeString(m[1]), env)
 			refs = append(refs, checkRef{
 				stepIdx:   i,
 				globalIdx: len(allChecks),
@@ -210,7 +229,7 @@ func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResu
 
 		if m := reFileEquals.FindStringSubmatch(text); m != nil {
 			negate := strings.Contains(text, "does not equal")
-			path := unescapeString(m[1])
+			path := expandVars(unescapeString(m[1]), env)
 			refs = append(refs, checkRef{
 				stepIdx:   i,
 				globalIdx: len(allChecks),
@@ -225,7 +244,7 @@ func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResu
 
 		if m := reFileEmpty.FindStringSubmatch(text); m != nil {
 			negate := m[2] == "not "
-			path := unescapeString(m[1])
+			path := expandVars(unescapeString(m[1]), env)
 			refs = append(refs, checkRef{
 				stepIdx:   i,
 				globalIdx: len(allChecks),
@@ -247,7 +266,7 @@ func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResu
 				if step.ResolvedType != parser.StepThen {
 					continue
 				}
-				results[i] = Evaluate(ctx, step, wr, dc, containerID)
+				results[i] = Evaluate(ctx, step, wr, dc, containerID, env)
 			}
 			return results
 		}
@@ -331,7 +350,7 @@ func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResu
 		if batchedSteps[i] {
 			continue
 		}
-		results[i] = Evaluate(ctx, step, wr, dc, containerID)
+		results[i] = Evaluate(ctx, step, wr, dc, containerID, env)
 	}
 
 	return results
@@ -339,7 +358,7 @@ func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResu
 
 // Evaluate evaluates a Then/And step against the captured WhenResult and
 // the container filesystem.
-func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc dockerReader, containerID string) Result {
+func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc dockerReader, containerID string, env []string) Result {
 	text := step.Text
 
 	if m := reExitCodeIs.FindStringSubmatch(text); m != nil {
@@ -406,7 +425,7 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 
 	if m := reFileExists.FindStringSubmatch(text); m != nil {
 		negate := strings.Contains(text, "does not exist")
-		path := unescapeString(m[1])
+		path := expandVars(unescapeString(m[1]), env)
 		exists, err := dc.FileExists(ctx, containerID, path)
 		if err != nil {
 			return fail("file exists check error: %v", err)
@@ -422,7 +441,7 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 
 	if m := reDirExists.FindStringSubmatch(text); m != nil {
 		negate := strings.Contains(text, "does not exist")
-		path := unescapeString(m[1])
+		path := expandVars(unescapeString(m[1]), env)
 		exists, err := dc.DirExists(ctx, containerID, path)
 		if err != nil {
 			return fail("directory exists check error: %v", err)
@@ -438,7 +457,7 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 
 	if m := reFileContainsBlock.FindStringSubmatch(text); m != nil {
 		negate := strings.Contains(text, "does not contain")
-		path := unescapeString(m[1])
+		path := expandVars(unescapeString(m[1]), env)
 		content, err := dc.ReadFile(ctx, containerID, path)
 		if err != nil {
 			return fail("read file %q: %v", path, err)
@@ -448,7 +467,7 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 
 	if m := reFileContains.FindStringSubmatch(text); m != nil {
 		negate := strings.Contains(text, "does not contain")
-		path := unescapeString(m[1])
+		path := expandVars(unescapeString(m[1]), env)
 		content, err := dc.ReadFile(ctx, containerID, path)
 		if err != nil {
 			return fail("read file %q: %v", path, err)
@@ -457,7 +476,7 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 	}
 
 	if m := reFileJSONExists.FindStringSubmatch(text); m != nil {
-		filePath := unescapeString(m[1])
+		filePath := expandVars(unescapeString(m[1]), env)
 		content, err := dc.ReadFile(ctx, containerID, filePath)
 		if err != nil {
 			return fail("read file %q: %v", filePath, err)
@@ -466,7 +485,7 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 	}
 
 	if m := reFileJSONEqualsBlock.FindStringSubmatch(text); m != nil {
-		filePath := unescapeString(m[1])
+		filePath := expandVars(unescapeString(m[1]), env)
 		content, err := dc.ReadFile(ctx, containerID, filePath)
 		if err != nil {
 			return fail("read file %q: %v", filePath, err)
@@ -475,7 +494,7 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 	}
 
 	if m := reFileJSONEqualsInline.FindStringSubmatch(text); m != nil {
-		filePath := unescapeString(m[1])
+		filePath := expandVars(unescapeString(m[1]), env)
 		content, err := dc.ReadFile(ctx, containerID, filePath)
 		if err != nil {
 			return fail("read file %q: %v", filePath, err)
@@ -485,7 +504,7 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 
 	if m := reFileMatches.FindStringSubmatch(text); m != nil {
 		negate := strings.Contains(text, "does not match")
-		filePath := unescapeString(m[1])
+		filePath := expandVars(unescapeString(m[1]), env)
 		pattern := unescapeString(m[2])
 		content, err := dc.ReadFile(ctx, containerID, filePath)
 		if err != nil {
@@ -507,7 +526,7 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 
 	if m := reFileEquals.FindStringSubmatch(text); m != nil {
 		negate := strings.Contains(text, "does not equal")
-		filePath := unescapeString(m[1])
+		filePath := expandVars(unescapeString(m[1]), env)
 		expected := unescapeString(m[2])
 		content, err := dc.ReadFile(ctx, containerID, filePath)
 		if err != nil {
@@ -525,7 +544,7 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 
 	if m := reFileEmpty.FindStringSubmatch(text); m != nil {
 		negate := m[2] == "not "
-		filePath := unescapeString(m[1])
+		filePath := expandVars(unescapeString(m[1]), env)
 		content, err := dc.ReadFile(ctx, containerID, filePath)
 		if err != nil {
 			return fail("read file %q: %v", filePath, err)
@@ -761,8 +780,8 @@ var (
 	reFileExists = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"(?:(?: does not)? exist[s]?)$`)
 	reDirExists  = regexp.MustCompile(`^(?:the )?directory "((?:[^"\\]|\\.)*)"(?:(?: does not)? exist[s]?)`)
 
-	reFileContainsBlock = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"` + `(?: does not)? contains:$`)
-	reFileContains      = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"` + `(?: does not)? contains "((?:[^"\\]|\\.)*)"`)
+	reFileContainsBlock = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"(?: does not)? contain(?:s)?:$`)
+	reFileContains      = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"(?: does not)? contain(?:s)? "((?:[^"\\]|\\.)*)"`)
 	reFileMatches       = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"(?: does not)? match(?:es)? pattern "((?:[^"\\]|\\.)*)"$`)
 	reFileEquals        = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"(?: does not)? equals? "((?:[^"\\]|\\.)*)"$`)
 	reFileEmpty         = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)" is (not )?empty$`)

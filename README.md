@@ -164,7 +164,13 @@ Given environment variable "VAR" is set to "value"
 
 `Given I run "..."` executes inside the current working directory (default `/smoko-work`, or whatever `Given the working directory is` set), sources `.smoko_env` if present, and fails the scenario immediately on a non-zero exit code.
 
-`Given the working directory is "path"` sets the working directory for all subsequent `Given I run` and `When I run` steps in the scenario. The path is relative to the scenario root (`/smoko-work`). The directory must already exist; if not, the scenario fails immediately with a clear error. `Then` file/directory assertions always use paths relative to `/smoko-work` regardless of this step.
+`Given the working directory is "path"` sets the working directory for all subsequent `Given I run` and `When I run` steps in the scenario. The path can be relative to the scenario root (`/smoko-work`) or absolute. The directory must already exist; if not, the scenario fails immediately with a clear error. `Then` file/directory assertions always use paths relative to `/smoko-work` regardless of this step.
+
+To reset the working directory back to the scenario root mid-scenario, use an absolute path:
+
+```gherkin
+Given the working directory is "/smoko-work"
+```
 
 #### Capturing output as variables
 
@@ -184,7 +190,7 @@ Given I run "my-cli version"
 And I save pattern "v([0-9.]+)" as $VERSION
 ```
 
-The variable becomes part of the environment for subsequent steps — you can reference it in later `Given I run` commands, `When I run`, or file content blocks using `$VERSION` (shell expansion).
+The variable becomes part of the environment for subsequent steps — you can reference it in later `Given I run` commands, `When I run`, file content blocks, and **Then/And file and directory path assertions** using `$VERSION` (e.g. `Then file "$OUTDIR/result.json" exists`).
 
 ### When Steps (Action)
 
@@ -192,6 +198,12 @@ The variable becomes part of the environment for subsequent steps — you can re
 When I run "command arg1 arg2"
 When I run "command" with input "stdin data"
 When I run "command" expecting exit code 1
+```
+
+Use `\"` inside a command string to include a literal double-quote character:
+
+```gherkin
+When I run "sh -c 'grep \"pattern\" file.txt'"
 ```
 
 ### Then Steps (Assertions)
@@ -359,7 +371,29 @@ Feature: Project Detection
 
 `Then` file paths remain relative to `/smoko-work` (the scenario root), not the working directory.
 
-### Example 4: JSON Output Assertions
+To reset back to `/smoko-work` mid-scenario, use an absolute path:
+
+```gherkin
+Given the working directory is "/smoko-work"
+```
+
+### Example 4: Variable Expansion in Then Assertions
+
+Variables captured with `And I save` expand in `Then` file and directory path arguments:
+
+```gherkin
+Feature: Output Directory
+  Scenario: CLI reports and populates output directory
+    Given I run "mycli init --json"
+      And I save JSON path "$.outputDir" as $OUTDIR
+    When I run "mycli generate"
+    Then exit code is 0
+    Then directory "$OUTDIR" exists
+    Then file "$OUTDIR/index.html" exists
+    Then file "$OUTDIR/index.html" contains "<!DOCTYPE html>"
+```
+
+### Example 5: JSON Output Assertions
 
 ```gherkin
 Feature: JSON API CLI
@@ -372,7 +406,7 @@ Feature: JSON API CLI
     Then output as JSON at path "$.user.active" equals true
 ```
 
-### Example 5: JSON File Assertions
+### Example 6: JSON File Assertions
 
 ```gherkin
 Feature: JSON File Generation

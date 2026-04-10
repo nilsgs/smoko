@@ -300,7 +300,7 @@ func runScenario(ctx context.Context, dc *docker.Client, feat parser.Feature, sc
 	}
 
 	// Run Given steps in declared order, batching adjacent file writes.
-	workdir, err := executor.RunGivenSteps(ctx, dc, containerID, allGiven, timeout, env)
+	workdir, givenEnv, err := executor.RunGivenSteps(ctx, dc, containerID, allGiven, timeout, env)
 	if err != nil {
 		rep.Error = err
 		return rep
@@ -345,7 +345,7 @@ func runScenario(ctx context.Context, dc *docker.Client, feat parser.Feature, sc
 			rep.Passed = false
 		}
 	} else {
-		allResults := assertions.EvaluateAll(ctx, sc.Steps, whenResult, dc, containerID)
+		allResults := assertions.EvaluateAll(ctx, sc.Steps, whenResult, dc, containerID, givenEnv)
 		for _, idx := range thenIndices {
 			ar := allResults[idx]
 			rep.AssertionResults = append(rep.AssertionResults, ar)

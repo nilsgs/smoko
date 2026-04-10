@@ -47,59 +47,65 @@ func WriteEnvFile(ctx context.Context, dc dockerRunner, containerID string, vars
 // operations only when they are adjacent so the declared order is preserved.
 // env holds the initial environment variables; any captured variables are
 // appended and written to .smoko_env so subsequent steps can use them.
-// Returns the effective working directory after all steps have run (starts at
-// docker.WorkDir() and may be updated by "Given the working directory is" steps).
-func RunGivenSteps(ctx context.Context, dc dockerRunner, containerID string, steps []parser.Step, timeout time.Duration, env []string) (string, error) {
+// Returns the effective working directory and the full set of environment
+// variables (initial + captured) after all steps have run.
+func RunGivenSteps(ctx context.Context, dc dockerRunner, containerID string, steps []parser.Step, timeout time.Duration, env []string) (workdir string, allEnv []string, err error) {
 	ops, err := buildGivenOps(steps)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
-	allEnv := append([]string(nil), env...)
-	workdir := docker.WorkDir()
+	allEnv = append([]string(nil), env...)
+	workdir = docker.WorkDir()
 
 	for _, op := range ops {
 		switch op.kind {
 		case givenOpSetWorkdir:
-			absPath := docker.WorkDir() + "/" + strings.TrimPrefix(op.path, "/")
+			var absPath string
+			if strings.HasPrefix(op.path, "/") {
+				absPath = op.path
+			} else {
+				absPath = docker.WorkDir() + "/" + op.path
+			}
 			_, _, code, err := dc.ExecCommand(ctx, containerID, workdir, "test -d "+docker.ShellQuote(absPath), "", 5*time.Second)
 			if err != nil {
-				return "", fmt.Errorf("Given %q: %w", op.stepText, err)
+				return "", nil, fmt.Errorf("Given %q: %w", op.stepText, err)
 			}
 			if code != 0 {
-				return "", fmt.Errorf("Given %q: directory %q does not exist", op.stepText, op.path)
+				return "", nil, fmt.Errorf("Given %q: directory %q does not exist", op.stepText, op.path)
 			}
 			workdir = absPath
 		case givenOpRunCommand:
 			stdout, err := runGivenCommandCapture(ctx, dc, containerID, op.command, workdir, timeout)
 			if err != nil {
-				return "", fmt.Errorf("Given %q: %w", op.stepText, err)
+				return "", nil, fmt.Errorf("Given %q: %w", op.stepText, err)
 			}
 			for _, cap := range op.captures {
 				value, err := extractCaptureValue(cap, stdout)
 				if err != nil {
-					return "", fmt.Errorf("Given %q: %w", cap.stepText, err)
+					return "", nil, fmt.Errorf("Given %q: %w", cap.stepText, err)
 				}
 				allEnv = append(allEnv, cap.varName+"="+value)
 				if err := WriteEnvFile(ctx, dc, containerID, allEnv); err != nil {
-					return "", fmt.Errorf("write env after capture: %w", err)
+					return "", nil, fmt.Errorf("write env after capture: %w", err)
 				}
 			}
 		default:
 			if err := executeGivenOp(ctx, dc, containerID, op, timeout); err != nil {
-				return "", err
+				return "", nil, err
 			}
 		}
 	}
 
-	return workdir, nil
+	return workdir, allEnv, nil
 }
 
 // RunGiven executes a single Given step against the container.
 // Prefer RunGivenSteps for ordered, batched execution.
 // Returns the effective working directory after the step.
 func RunGiven(ctx context.Context, dc dockerRunner, containerID string, step parser.Step, timeout time.Duration, env []string) (string, error) {
-	return RunGivenSteps(ctx, dc, containerID, []parser.Step{step}, timeout, env)
+	workdir, _, err := RunGivenSteps(ctx, dc, containerID, []parser.Step{step}, timeout, env)
+	return workdir, err
 }
 
 // CollectEnvVars scans Given steps for environment variable declarations and
@@ -126,17 +132,17 @@ func RunWhen(ctx context.Context, dc dockerRunner, containerID string, step pars
 	var expectedExitCode *int
 
 	if m := reRunWithInput.FindStringSubmatch(text); m != nil {
-		command = m[1]
+		command = unescapeGivenString(m[1])
 		stdin = m[2]
 	} else if m := reRunExpectingCode.FindStringSubmatch(text); m != nil {
-		command = m[1]
+		command = unescapeGivenString(m[1])
 		code := 0
 		if _, err := fmt.Sscan(m[2], &code); err != nil {
 			return nil, fmt.Errorf("invalid exit code %q: %w", m[2], err)
 		}
 		expectedExitCode = &code
 	} else if m := reRun.FindStringSubmatch(text); m != nil {
-		command = m[1]
+		command = unescapeGivenString(m[1])
 	} else {
 		if suggestion := hints.Suggest(text, knownWhenPatterns); suggestion != "" {
 			return nil, fmt.Errorf("unknown When step: %q\n  → did you mean: %q?", text, suggestion)
@@ -332,7 +338,7 @@ func classifyGivenStep(step parser.Step) (givenAction, error) {
 		return givenAction{
 			kind:     givenRun,
 			stepText: text,
-			command:  m[1],
+			command:  unescapeGivenString(m[1]),
 		}, nil
 	}
 
@@ -406,6 +412,7 @@ var knownGivenPatterns = []string{
 	`I save JSON path "$.field" as $VAR`,
 	`I save pattern "regex" as $VAR`,
 	`the working directory is "path"`,
+	`the working directory is "/smoko-work"`,
 }
 
 func executeGivenOp(ctx context.Context, dc dockerRunner, containerID string, op givenOp, timeout time.Duration) error {
@@ -456,16 +463,16 @@ var (
 	reDirExists       = regexp.MustCompile(`^(?:the )?directory "([^"]+)" exists$`)
 	reEmptyWorkDir    = regexp.MustCompile(`^an empty working directory$`)
 	reEnvVar          = regexp.MustCompile(`^environment variable "([^"]+)" is set to "([^"]*)"$`)
-	reGivenRun        = regexp.MustCompile(`^I run "([^"]+)"$`)
+	reGivenRun        = regexp.MustCompile(`^I run "((?:[^"\\]|\\.)*)"$`)
 	reSetWorkdir      = regexp.MustCompile(`^the working directory is "([^"]+)"$`)
 
 	reSaveOutput   = regexp.MustCompile(`^I save output as \$([A-Za-z_][A-Za-z0-9_]*)$`)
 	reSaveJSONPath = regexp.MustCompile(`^I save JSON path "((?:[^"\\]|\\.)*)" as \$([A-Za-z_][A-Za-z0-9_]*)$`)
 	reSavePattern  = regexp.MustCompile(`^I save pattern "((?:[^"\\]|\\.)*)" as \$([A-Za-z_][A-Za-z0-9_]*)$`)
 
-	reRun              = regexp.MustCompile(`^I run "([^"]+)"$`)
-	reRunWithInput     = regexp.MustCompile(`^I run "([^"]+)" with input "([^"]*)"$`)
-	reRunExpectingCode = regexp.MustCompile(`^I run "([^"]+)" expecting exit code (\d+)$`)
+	reRun              = regexp.MustCompile(`^I run "((?:[^"\\]|\\.)*)"$`)
+	reRunWithInput     = regexp.MustCompile(`^I run "((?:[^"\\]|\\.)*)" with input "([^"]*)"$`)
+	reRunExpectingCode = regexp.MustCompile(`^I run "((?:[^"\\]|\\.)*)" expecting exit code (\d+)$`)
 )
 
 // extractCaptureValue extracts the value to store given the capture spec and the stdout of the preceding run.

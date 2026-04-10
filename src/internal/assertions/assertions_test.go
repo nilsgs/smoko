@@ -15,16 +15,18 @@ import (
 )
 
 type fakeDocker struct {
-	fileExistsResult bool
-	dirExistsResult  bool
-	readFileContent  string
-	readFileErr      error
-	batchResults     []docker.FSResult
-	batchErr         error
-	batchChecks      []docker.FSCheck
+	fileExistsResult   bool
+	dirExistsResult    bool
+	readFileContent    string
+	readFileErr        error
+	batchResults       []docker.FSResult
+	batchErr           error
+	batchChecks        []docker.FSCheck
+	lastFileExistsPath string
 }
 
 func (f *fakeDocker) FileExists(ctx context.Context, containerID, path string) (bool, error) {
+	f.lastFileExistsPath = path
 	return f.fileExistsResult, nil
 }
 
@@ -52,14 +54,14 @@ func newWhenResult(stdout, stderr string, exitCode int) *executor.WhenResult {
 func TestExitCodeIs(t *testing.T) {
 	wr := newWhenResult("", "", 0)
 	step := parser.Step{Text: "exit code is 0"}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestExitCodeIsFailure(t *testing.T) {
 	wr := newWhenResult("", "", 1)
 	step := parser.Step{Text: "exit code is 0"}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.False(t, r.Pass)
 	assert.Contains(t, r.Message, "exit code")
 }
@@ -67,91 +69,91 @@ func TestExitCodeIsFailure(t *testing.T) {
 func TestExitCodeIsNot(t *testing.T) {
 	wr := newWhenResult("", "", 1)
 	step := parser.Step{Text: "exit code is not 0"}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestOutputContains(t *testing.T) {
 	wr := newWhenResult("hello world", "", 0)
 	step := parser.Step{Text: `output contains "hello"`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestOutputDoesNotContain(t *testing.T) {
 	wr := newWhenResult("hello world", "", 0)
 	step := parser.Step{Text: `output does not contain "error"`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestOutputDoesNotContainFailure(t *testing.T) {
 	wr := newWhenResult("error: something failed", "", 0)
 	step := parser.Step{Text: `output does not contain "error"`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.False(t, r.Pass)
 }
 
 func TestStdoutContains(t *testing.T) {
 	wr := newWhenResult("only stdout", "only stderr", 0)
 	step := parser.Step{Text: `stdout contains "only stdout"`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestStderrContains(t *testing.T) {
 	wr := newWhenResult("only stdout", "only stderr", 0)
 	step := parser.Step{Text: `stderr contains "only stderr"`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestOutputMatchesPattern(t *testing.T) {
 	wr := newWhenResult("version 1.2.3", "", 0)
 	step := parser.Step{Text: `output matches pattern "version \d+\.\d+\.\d+"`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestStdoutMatchesPattern(t *testing.T) {
 	wr := newWhenResult("version 1.2.3", "stderr text", 0)
 	step := parser.Step{Text: `stdout matches pattern "version \d+\.\d+\.\d+"`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestStderrMatchesPattern(t *testing.T) {
 	wr := newWhenResult("stdout text", "error: boom", 0)
 	step := parser.Step{Text: `stderr matches pattern "error: \w+"`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestStderrDoesNotMatchPattern(t *testing.T) {
 	wr := newWhenResult("stdout text", "all fine", 0)
 	step := parser.Step{Text: `stderr does not match pattern "panic:"`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestStderrDoesNotMatchPatternFailure(t *testing.T) {
 	wr := newWhenResult("stdout text", "panic: nil pointer", 0)
 	step := parser.Step{Text: `stderr does not match pattern "panic:"`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.False(t, r.Pass)
 }
 
 func TestOutputMatchesPatternFailure(t *testing.T) {
 	wr := newWhenResult("no version here", "", 0)
 	step := parser.Step{Text: `output matches pattern "version \d+\.\d+\.\d+"`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.False(t, r.Pass)
 }
 
 func TestOutputMatchesInvalidRegex(t *testing.T) {
 	wr := newWhenResult("anything", "", 0)
 	step := parser.Step{Text: `output matches pattern "[invalid"`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.False(t, r.Pass)
 	assert.Contains(t, r.Message, "invalid regex")
 }
@@ -159,21 +161,21 @@ func TestOutputMatchesInvalidRegex(t *testing.T) {
 func TestOutputEquals(t *testing.T) {
 	wr := newWhenResult("hello world\n", "", 0)
 	step := parser.Step{Text: `output equals "hello world"`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestOutputDoesNotEqual(t *testing.T) {
 	wr := newWhenResult("hello world", "", 0)
 	step := parser.Step{Text: `output does not equal "goodbye"`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestOutputEqualsFailure(t *testing.T) {
 	wr := newWhenResult("hello world", "", 0)
 	step := parser.Step{Text: `output equals "goodbye"`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.False(t, r.Pass)
 	assert.Contains(t, r.Message, "does not equal")
 }
@@ -181,70 +183,70 @@ func TestOutputEqualsFailure(t *testing.T) {
 func TestStdoutEquals(t *testing.T) {
 	wr := newWhenResult("hello\n", "some error", 0)
 	step := parser.Step{Text: `stdout equals "hello"`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestStderrEquals(t *testing.T) {
 	wr := newWhenResult("hello", "error msg\n", 0)
 	step := parser.Step{Text: `stderr equals "error msg"`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestOutputIsEmpty(t *testing.T) {
 	wr := newWhenResult("", "", 0)
 	step := parser.Step{Text: "output is empty"}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestOutputIsNotEmpty(t *testing.T) {
 	wr := newWhenResult("something", "", 0)
 	step := parser.Step{Text: "output is not empty"}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestOutputIsEmptyFailure(t *testing.T) {
 	wr := newWhenResult("not empty", "", 0)
 	step := parser.Step{Text: "output is empty"}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.False(t, r.Pass)
 }
 
 func TestOutputIsNotEmptyFailure(t *testing.T) {
 	wr := newWhenResult("", "", 0)
 	step := parser.Step{Text: "output is not empty"}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.False(t, r.Pass)
 }
 
 func TestStderrIsEmpty(t *testing.T) {
 	wr := newWhenResult("stdout stuff", "", 0)
 	step := parser.Step{Text: "stderr is empty"}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestFileMatchesPattern(t *testing.T) {
 	fd := &fakeDocker{readFileContent: "v1.2.3\n"}
 	step := parser.Step{Text: `file "VERSION" matches pattern "v\d+\.\d+\.\d+"`}
-	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestFileDoesNotMatchPattern(t *testing.T) {
 	fd := &fakeDocker{readFileContent: "release notes here\n"}
 	step := parser.Step{Text: `file "notes.txt" does not match pattern "^ERROR"`}
-	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestFileMatchesPatternFailure(t *testing.T) {
 	fd := &fakeDocker{readFileContent: "no version\n"}
 	step := parser.Step{Text: `file "VERSION" matches pattern "v\d+\.\d+\.\d+"`}
-	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", nil)
 	assert.False(t, r.Pass)
 	assert.Contains(t, r.Message, "does not match pattern")
 }
@@ -252,21 +254,21 @@ func TestFileMatchesPatternFailure(t *testing.T) {
 func TestFileEquals(t *testing.T) {
 	fd := &fakeDocker{readFileContent: "1.3.0\n"}
 	step := parser.Step{Text: `file "VERSION" equals "1.3.0"`}
-	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestFileDoesNotEqual(t *testing.T) {
 	fd := &fakeDocker{readFileContent: "1.3.0\n"}
 	step := parser.Step{Text: `file "VERSION" does not equal "2.0.0"`}
-	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestFileEqualsFailure(t *testing.T) {
 	fd := &fakeDocker{readFileContent: "1.3.0\n"}
 	step := parser.Step{Text: `file "VERSION" equals "2.0.0"`}
-	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", nil)
 	assert.False(t, r.Pass)
 	assert.Contains(t, r.Message, "does not equal")
 }
@@ -274,28 +276,28 @@ func TestFileEqualsFailure(t *testing.T) {
 func TestFileIsEmpty(t *testing.T) {
 	fd := &fakeDocker{readFileContent: ""}
 	step := parser.Step{Text: `file "empty.txt" is empty`}
-	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestFileIsNotEmpty(t *testing.T) {
 	fd := &fakeDocker{readFileContent: "some content\n"}
 	step := parser.Step{Text: `file "data.txt" is not empty`}
-	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestFileIsEmptyFailure(t *testing.T) {
 	fd := &fakeDocker{readFileContent: "not empty"}
 	step := parser.Step{Text: `file "data.txt" is empty`}
-	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", nil)
 	assert.False(t, r.Pass)
 }
 
 func TestFileIsNotEmptyFailure(t *testing.T) {
 	fd := &fakeDocker{readFileContent: ""}
 	step := parser.Step{Text: `file "data.txt" is not empty`}
-	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", nil)
 	assert.False(t, r.Pass)
 }
 
@@ -314,7 +316,7 @@ func TestEvaluateAllBatchesNewFileAssertions(t *testing.T) {
 		{ResolvedType: parser.StepThen, Text: `file "empty.txt" is empty`},
 		{ResolvedType: parser.StepThen, Text: `file "data.txt" is not empty`},
 	}
-	results := assertions.EvaluateAll(context.Background(), steps, newWhenResult("", "", 0), fd, "cid")
+	results := assertions.EvaluateAll(context.Background(), steps, newWhenResult("", "", 0), fd, "cid", nil)
 	require.Len(t, fd.batchChecks, 4)
 	assert.True(t, results[0].Pass)
 	assert.True(t, results[1].Pass)
@@ -325,7 +327,7 @@ func TestEvaluateAllBatchesNewFileAssertions(t *testing.T) {
 func TestUnknownAssertion(t *testing.T) {
 	wr := newWhenResult("", "", 0)
 	step := parser.Step{Text: "totally unknown assertion"}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.False(t, r.Pass)
 	assert.Contains(t, r.Message, "unknown Then assertion")
 }
@@ -333,63 +335,63 @@ func TestUnknownAssertion(t *testing.T) {
 func TestOutputContainsEscapedQuote(t *testing.T) {
 	wr := newWhenResult(`"name": "value"`, "", 0)
 	step := parser.Step{Text: `output contains "\"name\": \"value\""`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestOutputDoesNotContainEscapedQuote(t *testing.T) {
 	wr := newWhenResult(`no json here`, "", 0)
 	step := parser.Step{Text: `output does not contain "\"name\": \"value\""`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestOutputContainsEscapedQuoteFailure(t *testing.T) {
 	wr := newWhenResult(`no json here`, "", 0)
 	step := parser.Step{Text: `output contains "\"name\": \"value\""`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.False(t, r.Pass)
 }
 
 func TestOutputMatchesEscapedQuote(t *testing.T) {
 	wr := newWhenResult(`{"ok":true}`, "", 0)
 	step := parser.Step{Text: `output matches pattern "\{\"ok\":true\}"`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestOutputJSONPathExists(t *testing.T) {
 	wr := newWhenResult(`{"user":{"name":"Alice"}}`, "", 0)
 	step := parser.Step{Text: `output as JSON at path "$.user.name" exists`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestStdoutJSONPathEqualsString(t *testing.T) {
 	wr := newWhenResult(`{"user":{"name":"Alice"}}`, "", 0)
 	step := parser.Step{Text: `stdout as JSON at path "$.user.name" equals "Alice"`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestStderrJSONPathEqualsBoolean(t *testing.T) {
 	wr := newWhenResult("", `{"ok":true}`, 0)
 	step := parser.Step{Text: `stderr as JSON at path "$.ok" equals true`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestOutputJSONPathEqualsNumber(t *testing.T) {
 	wr := newWhenResult(`{"count":3}`, "", 0)
 	step := parser.Step{Text: `output as JSON at path "$.count" equals 3`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestOutputJSONPathEqualsNull(t *testing.T) {
 	wr := newWhenResult(`{"value":null}`, "", 0)
 	step := parser.Step{Text: `output as JSON at path "$.value" equals null`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
@@ -399,14 +401,14 @@ func TestOutputJSONPathEqualsBlockObject(t *testing.T) {
 		Text:  `output as JSON at path "$.user" equals:`,
 		Block: "{\n  \"name\": \"Alice\",\n  \"roles\": [\"admin\"]\n}",
 	}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.True(t, r.Pass)
 }
 
 func TestOutputJSONPathInvalidJSON(t *testing.T) {
 	wr := newWhenResult(`not json`, "", 0)
 	step := parser.Step{Text: `output as JSON at path "$.user.name" exists`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.False(t, r.Pass)
 	assert.Contains(t, r.Message, "output is not valid JSON")
 }
@@ -414,7 +416,7 @@ func TestOutputJSONPathInvalidJSON(t *testing.T) {
 func TestOutputJSONPathInvalidPath(t *testing.T) {
 	wr := newWhenResult(`{"user":{"name":"Alice"}}`, "", 0)
 	step := parser.Step{Text: `output as JSON at path "$.user[" exists`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.False(t, r.Pass)
 	assert.Contains(t, r.Message, "invalid JSONPath")
 }
@@ -422,7 +424,7 @@ func TestOutputJSONPathInvalidPath(t *testing.T) {
 func TestOutputJSONPathEqualsRequiresSingleMatch(t *testing.T) {
 	wr := newWhenResult(`{"items":[{"id":1},{"id":2}]}`, "", 0)
 	step := parser.Step{Text: `output as JSON at path "$.items[*].id" equals 1`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.False(t, r.Pass)
 	assert.Contains(t, r.Message, "matched 2 values")
 }
@@ -430,7 +432,7 @@ func TestOutputJSONPathEqualsRequiresSingleMatch(t *testing.T) {
 func TestOutputJSONPathEqualsFailureShowsExpectedAndActual(t *testing.T) {
 	wr := newWhenResult(`{"user":{"name":"Bob"}}`, "", 0)
 	step := parser.Step{Text: `output as JSON at path "$.user.name" equals "Alice"`}
-	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
 	assert.False(t, r.Pass)
 	assert.Contains(t, r.Message, `expected "Alice", got "Bob"`)
 }
@@ -438,7 +440,7 @@ func TestOutputJSONPathEqualsFailureShowsExpectedAndActual(t *testing.T) {
 func TestFileJSONPathExists(t *testing.T) {
 	fd := &fakeDocker{readFileContent: `{"meta":{"ok":true}}`}
 	step := parser.Step{Text: `file "result.json" as JSON at path "$.meta.ok" exists`}
-	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", nil)
 	assert.True(t, r.Pass)
 }
 
@@ -448,7 +450,7 @@ func TestFileJSONPathEqualsArrayBlock(t *testing.T) {
 		Text:  `file "result.json" as JSON at path "$.items" equals:`,
 		Block: "[1, 2, 3]",
 	}
-	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", nil)
 	assert.True(t, r.Pass)
 }
 
@@ -464,7 +466,7 @@ func TestEvaluateAllBatchesFileJSONAssertions(t *testing.T) {
 		{ResolvedType: parser.StepThen, Text: `file "items.json" as JSON at path "$.items" equals:`, Block: "[1,2,3]"},
 	}
 
-	results := assertions.EvaluateAll(context.Background(), steps, newWhenResult("", "", 0), fd, "cid")
+	results := assertions.EvaluateAll(context.Background(), steps, newWhenResult("", "", 0), fd, "cid", nil)
 	require.Len(t, fd.batchChecks, 2)
 	assert.Equal(t, []docker.FSCheck{
 		{Kind: docker.FSCheckReadFile, Path: "user.json"},
@@ -483,6 +485,38 @@ func TestEvaluateAllFallsBackWhenBatchFails(t *testing.T) {
 		{ResolvedType: parser.StepThen, Text: `file "user.json" as JSON at path "$.user.name" equals "Alice"`},
 	}
 
-	results := assertions.EvaluateAll(context.Background(), steps, newWhenResult("", "", 0), fd, "cid")
+	results := assertions.EvaluateAll(context.Background(), steps, newWhenResult("", "", 0), fd, "cid", nil)
 	assert.True(t, results[0].Pass)
+}
+
+func TestFileDoesNotContain(t *testing.T) {
+	fd := &fakeDocker{readFileContent: "hello world"}
+	step := parser.Step{Text: `file "out.txt" does not contain "error"`}
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", nil)
+	assert.True(t, r.Pass)
+}
+
+func TestFileDoesNotContainFailure(t *testing.T) {
+	fd := &fakeDocker{readFileContent: "error: something went wrong"}
+	step := parser.Step{Text: `file "out.txt" does not contain "error"`}
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", nil)
+	assert.False(t, r.Pass)
+}
+
+func TestFileExistsWithVarExpansion(t *testing.T) {
+	fd := &fakeDocker{fileExistsResult: true}
+	step := parser.Step{Text: `file "$DIR/output.txt" exists`}
+	env := []string{"DIR=/smoko-work/mydir"}
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", env)
+	assert.True(t, r.Pass)
+	// The path passed to Docker should have the variable expanded
+	assert.Equal(t, "/smoko-work/mydir/output.txt", fd.lastFileExistsPath)
+}
+
+func TestFileContainsWithVarExpansion(t *testing.T) {
+	fd := &fakeDocker{readFileContent: "hello"}
+	step := parser.Step{Text: `file "$OUTFILE" contains "hello"`}
+	env := []string{"OUTFILE=/smoko-work/result.txt"}
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", env)
+	assert.True(t, r.Pass)
 }

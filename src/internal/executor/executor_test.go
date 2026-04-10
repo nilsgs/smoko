@@ -129,7 +129,7 @@ func TestRunGivenStepsPreservesOrderAroundCommands(t *testing.T) {
 		{ResolvedType: parser.StepWhen, Text: `I run "ls"`},
 	}
 
-	_, err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
+	_, _, err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"write-files", "exec", "write-files", "mkdir:nested"}, fd.ops)
@@ -163,7 +163,7 @@ func TestRunGivenStepsCommandFailureIncludesDetails(t *testing.T) {
 		{ResolvedType: parser.StepGiven, Text: `I run "sh -c 'echo partial output; echo boom >&2; exit 7'"`},
 	}
 
-	_, err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 3*time.Second, nil)
+	_, _, err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 3*time.Second, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Given ")
 	assert.Contains(t, err.Error(), `command "sh -c 'echo partial output; echo boom >&2; exit 7'" exited with code 7`)
@@ -212,7 +212,7 @@ func TestSaveOutputCapture(t *testing.T) {
 		{ResolvedType: parser.StepGiven, Text: `I save output as $GREETING`},
 	}
 
-	_, err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
+	_, _, err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
 	require.NoError(t, err)
 	// WriteEnvFile is called — we just verify no error and the env write happened
 	require.GreaterOrEqual(t, len(fd.execCalls), 1)
@@ -232,7 +232,7 @@ func TestSaveJSONPathCapture(t *testing.T) {
 		{ResolvedType: parser.StepGiven, Text: `I save JSON path "$.name" as $NAME`},
 	}
 
-	_, err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
+	_, _, err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
 	require.NoError(t, err)
 }
 
@@ -250,7 +250,7 @@ func TestSavePatternCapture(t *testing.T) {
 		{ResolvedType: parser.StepGiven, Text: `I save pattern "version ([0-9.]+)" as $VERSION`},
 	}
 
-	_, err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
+	_, _, err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
 	require.NoError(t, err)
 }
 
@@ -263,7 +263,7 @@ func TestSaveStepWithoutRunErrors(t *testing.T) {
 		{ResolvedType: parser.StepGiven, Text: `I save output as $FOO`},
 	}
 
-	_, err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
+	_, _, err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must immediately follow")
 }
@@ -281,7 +281,7 @@ func TestSavePatternRequiresCaptureGroup(t *testing.T) {
 		{ResolvedType: parser.StepGiven, Text: `I save pattern "version [0-9.]+" as $VERSION`},
 	}
 
-	_, err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
+	_, _, err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "capture group")
 }
@@ -299,7 +299,7 @@ func TestSaveJSONPathNotFound(t *testing.T) {
 		{ResolvedType: parser.StepGiven, Text: `I save JSON path "$.missing" as $VAL`},
 	}
 
-	_, err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
+	_, _, err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
@@ -347,7 +347,7 @@ func TestSetWorkdirChangesExecWorkdir(t *testing.T) {
 		{ResolvedType: parser.StepGiven, Text: `I run "touch marker.txt"`},
 	}
 
-	workdir, err := executor.RunGivenSteps(context.Background(), fd, "c1", steps, 5*time.Second, nil)
+	workdir, _, err := executor.RunGivenSteps(context.Background(), fd, "c1", steps, 5*time.Second, nil)
 	require.NoError(t, err)
 	assert.Equal(t, docker.WorkDir()+"/src/App", workdir)
 	require.Len(t, fd.execCalls, 2)
@@ -370,8 +370,63 @@ func TestSetWorkdirMissingDirErrors(t *testing.T) {
 		{ResolvedType: parser.StepGiven, Text: `the working directory is "nonexistent"`},
 	}
 
-	_, err := executor.RunGivenSteps(context.Background(), fd, "c1", steps, 5*time.Second, nil)
+	_, _, err := executor.RunGivenSteps(context.Background(), fd, "c1", steps, 5*time.Second, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `"nonexistent"`)
 	assert.Contains(t, err.Error(), "does not exist")
+}
+
+func TestEscapedQuoteInGivenRun(t *testing.T) {
+	t.Parallel()
+
+	fd := &fakeDocker{
+		execResults: []execResult{
+			{exitCode: 0},
+		},
+	}
+	steps := []parser.Step{
+		{ResolvedType: parser.StepGiven, Text: `I run "sh -c \"echo hi\""`},
+	}
+
+	_, _, err := executor.RunGivenSteps(context.Background(), fd, "c1", steps, 5*time.Second, nil)
+	require.NoError(t, err)
+	require.Len(t, fd.execCalls, 1)
+	assert.Contains(t, fd.execCalls[0].command, `sh -c "echo hi"`)
+}
+
+func TestRunGivenStepsReturnsCapturedEnv(t *testing.T) {
+	t.Parallel()
+
+	fd := &fakeDocker{
+		execResults: []execResult{
+			{stdout: "/smoko-work/myrepo\n", exitCode: 0},
+		},
+	}
+	steps := []parser.Step{
+		{ResolvedType: parser.StepGiven, Text: `I run "pwd"`},
+		{ResolvedType: parser.StepGiven, Text: `I save output as $WFOLDER`},
+	}
+
+	_, env, err := executor.RunGivenSteps(context.Background(), fd, "c1", steps, 5*time.Second, nil)
+	require.NoError(t, err)
+	assert.Contains(t, env, "WFOLDER=/smoko-work/myrepo")
+}
+
+func TestAbsoluteWorkdirReset(t *testing.T) {
+	t.Parallel()
+
+	fd := &fakeDocker{
+		execResults: []execResult{
+			{exitCode: 0}, // test -d subdir succeeds
+			{exitCode: 0}, // test -d /smoko-work succeeds
+		},
+	}
+	steps := []parser.Step{
+		{ResolvedType: parser.StepGiven, Text: `the working directory is "subdir"`},
+		{ResolvedType: parser.StepGiven, Text: `the working directory is "/smoko-work"`},
+	}
+
+	workdir, _, err := executor.RunGivenSteps(context.Background(), fd, "c1", steps, 5*time.Second, nil)
+	require.NoError(t, err)
+	assert.Equal(t, docker.WorkDir(), workdir)
 }
