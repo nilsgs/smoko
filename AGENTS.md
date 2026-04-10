@@ -28,17 +28,21 @@ Smoko is a platform-agnostic smoke testing tool for CLI applications. It allows 
   1. Collects environment variables from Given steps
   2. Creates container with those env vars
   3. Runs Given steps — **batched** via `RunGivenSteps`: file writes go into one tar upload, dir creation uses separate exec only when needed
-  4. Runs When step (captures stdout/stderr/exit code)
-  5. Evaluates Then/And assertions
-- `RunGivenSteps(ctx, dc, containerID, steps)` is the preferred API; `RunGiven` (single step) is kept for compatibility
+  4. Captures stdout from `Given I run` steps and writes captured variables to `.smoko_env`
+  5. Runs When step (captures stdout/stderr/exit code)
+  6. Evaluates Then/And assertions
+- `RunGivenSteps(ctx, dc, containerID, steps, timeout, env)` is the preferred API; `RunGiven` (single step) is kept for compatibility
+- Variable capture: `And I save output/JSON path/pattern as $VAR` steps append to `.smoko_env`
 - File operations are done via Docker exec/tar, not host mounts
+- Fuzzy hints: unknown Given/When steps suggest closest known pattern via `internal/hints`
 
 **Assertions** (`internal/assertions/`)
 - Evaluates Then/And steps against captured WhenResult and container filesystem
 - Regex pattern matching via Go's `regexp` (RE2 dialect); patterns cached in `sync.Map`
 - `EvaluateAll(ctx, steps, wr, dc, containerID)` is the preferred API — batches all filesystem checks into one docker exec before evaluating
 - `Evaluate(ctx, step, wr, dc, containerID)` handles a single step (used as fallback)
-- Supports: exit codes, output contains/matches, file/directory existence, file content
+- Supports: exit codes, output contains/matches/equals/empty, file/directory existence, file content, JSON path assertions
+- Fuzzy hints: unknown Then steps suggest closest known pattern via `internal/hints`
 
 **Reporter** (`internal/reporter/`)
 - Collects scenario results and prints colored output
@@ -50,8 +54,13 @@ Smoko is a platform-agnostic smoke testing tool for CLI applications. It allows 
 
 **Config** (`internal/config/`)
 - Loads `.smokorc` (TOML format)
-- Fields: `image` (string), `timeout` (int seconds)
+- Fields: `image` (string), `timeout` (int seconds), `build` (string — command to build Docker image)
 - Image resolution precedence: `--image` flag > `Image:` in .smoko > `.smokorc` default
+- When `build` is set and `--no-build` is not passed, the build command runs before image pull
+
+**Hints** (`internal/hints/`)
+- `Suggest(text, patterns []string) string` — Levenshtein distance on normalised step text
+- Used by executor and assertions to suggest the closest known step pattern on unknown input
 
 ### Data Flow
 
@@ -60,6 +69,8 @@ Smoko is a platform-agnostic smoke testing tool for CLI applications. It allows 
     ↓
 Parse → []Feature{[]Scenario{[]Step}}
     ↓
+Run build command (if .smokorc has build = "..." and --no-build not set)
+    ↓
 Pull unique images (cached via sync.Map)
     ↓
 For each Scenario (optionally parallel via --parallel N):
@@ -67,10 +78,11 @@ For each Scenario (optionally parallel via --parallel N):
   2. docker.CreateContainer(image, env)
   3. Batch all Given file writes → docker.WriteFiles (single tar)
   4. Run mkdir for explicit directory steps
-  5. Run Scenario When step → capture WhenResult
-  6. Batch Then filesystem checks → docker.BatchFSCheck (single exec)
-  7. Evaluate all Then steps against WhenResult + FSCheck results
-  8. docker.RemoveContainer
+  5. Run Given I run steps; for each I save step → append var to .smoko_env
+  6. Run Scenario When step → capture WhenResult
+  7. Batch Then filesystem checks → docker.BatchFSCheck (single exec)
+  8. Evaluate all Then steps against WhenResult + FSCheck results
+  9. docker.RemoveContainer
     ↓
 Reporter aggregates & prints results (thread-safe)
     ↓
@@ -81,13 +93,14 @@ Exit code: 0 (pass), 1 (fail), 2 (error)
 
 ### Key Files
 
-- `cmd/smoko/main.go`: CLI entry point (Cobra), orchestrates test discovery, parallel execution, container lifecycle, reporting
+- `cmd/smoko/main.go`: CLI entry point (Cobra), orchestrates test discovery, parallel execution, container lifecycle, reporting; `--list` flag prints scenarios without running Docker; defaults to `specs/` path
 - `internal/parser/types.go`: AST types (StepType, Step, Scenario, Feature)
 - `internal/parser/lexer.go`: Tokenization with stateful block detection
 - `internal/parser/parser.go`: Recursive-descent parser
 - `internal/docker/docker.go`: Docker SDK wrapper; includes `WriteFiles` (batched tar upload), `BatchFSCheck` (batched filesystem checks), `PullIfMissing` (with sync.Map cache)
-- `internal/executor/executor.go`: Given/When handlers; `RunGivenSteps` batches all file writes into one tar upload
-- `internal/assertions/assertions.go`: Then assertion evaluators; `EvaluateAll` batches filesystem checks; regex cache via sync.Map
+- `internal/executor/executor.go`: Given/When handlers; `RunGivenSteps` batches file writes and handles variable capture; `knownGivenPatterns`/`knownWhenPatterns` for fuzzy hints
+- `internal/assertions/assertions.go`: Then assertion evaluators; `EvaluateAll` batches filesystem checks; regex cache via sync.Map; `knownThenPatterns` for fuzzy hints
+- `internal/hints/hints.go`: `Suggest()` function using Levenshtein distance on normalised step text
 - `internal/reporter/reporter.go`: Output formatting with colors; thread-safe `Add()` for parallel use
 
 ### Testing
@@ -135,9 +148,9 @@ Add new step parsing patterns to `executor.go` (Given/When) or `assertions.go` (
 
 Common pattern: parse step text with regex, compare actual vs expected, return Result{Pass, Message}.
 
-### JSON Assertions (Future)
+### JSON Assertions
 
-Not in MVP. Pattern: parse step text for JSONPath, unmarshal actual output, evaluate path.
+Supported via JSONPath (uses `github.com/theory/jsonpath`). Pattern: parse step text for source (`output`/`stdout`/`stderr`/`file`), JSONPath expression, and expected value; unmarshal actual output; evaluate path.
 
 ### Parallel Execution
 

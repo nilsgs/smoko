@@ -239,6 +239,62 @@ Then directory "path/to/dir" does not exist
 
 ## Patterns
 
+### Sequential setup with variable capture
+
+Use `Given I run` + `And I save` to chain setup steps that depend on each other's output:
+
+```gherkin
+Scenario: Task added to a feature
+  Given I run "mycli init --name my-project"
+  Given I run "mycli feature add my-feature --json"
+    And I save JSON path "$.id" as $FID
+  When I run "mycli task add my-task --feature $FID --json"
+  Then exit code is 0
+  Then output as JSON at path "$.title" equals "my-task"
+```
+
+Don't wrap sequential commands in `sh -c` chains when `Given I run` handles it directly.
+
+### Prefer JSONPath over substring matching for structured output
+
+```gherkin
+# Prefer this:
+Then output as JSON at path "$.title" equals "my-task"
+Then output as JSON at path "$.status" equals "todo"
+
+# Over this:
+Then output contains "\"title\": \"my-task\""
+Then output contains "\"status\": \"todo\""
+```
+
+JSONPath is whitespace-independent, validates structure, and is more readable.
+
+### Always check both exit code and message for error cases
+
+```gherkin
+Scenario: Rejects invalid input
+  When I run "mycli process --format invalid"
+  Then exit code is not 0
+  Then stderr contains "unsupported format"
+```
+
+Checking only the exit code can mask wrong-reason failures.
+
+### Helper scripts in Docker images
+
+For complex test utilities, bake a helper script into the image rather than inlining shell logic in specs:
+
+```dockerfile
+# In Dockerfile.test
+COPY specs/helpers/seed.sh /usr/local/bin/seed
+```
+
+```gherkin
+Given I run "seed init-repo myrepo"
+```
+
+This keeps specs readable and moves shell complexity into a maintainable script.
+
 ### Shared setup in Background
 
 ```gherkin

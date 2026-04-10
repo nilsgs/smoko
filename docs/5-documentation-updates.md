@@ -1,5 +1,7 @@
 # 5 — Documentation Updates
 
+STATUS: DONE
+
 ## Problem
 
 The smoko skill and README lack practical guidance for adopting smoko in a new project. Every consumer repo has independently invented the same setup pattern. The skill also doesn't document common idioms, leading to suboptimal test writing (e.g., using `sh -c` chains where `Given I run` already works).

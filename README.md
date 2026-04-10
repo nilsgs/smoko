@@ -75,6 +75,64 @@ smoko run specs/ --list
 
 ## DSL Reference
 
+## Setting Up Smoko for Your Project
+
+### Dockerfile.test Template
+
+Create a `Dockerfile.test` that builds and packages your CLI:
+
+```dockerfile
+# Build stage — compile your CLI
+FROM golang:1.22 AS builder
+WORKDIR /build
+COPY src/ .
+RUN go build -o /usr/local/bin/mycli .
+
+# Runtime stage — minimal image with your CLI
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends bash && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /usr/local/bin/mycli /usr/local/bin/mycli
+WORKDIR /smoko-work
+```
+
+Adjust the build stage for your language. Key requirements:
+- Your CLI binary must be on `PATH` inside the container
+- Working directory must be `/smoko-work`
+- Include runtime dependencies your CLI needs (bash, git, etc.)
+
+### .smokorc
+
+```toml
+image   = "mycli-test:latest"
+timeout = 5
+build   = "docker build -f Dockerfile.test -t mycli-test:latest ."
+```
+
+### Directory Layout
+
+```
+myproject/
+├── .smokorc
+├── Dockerfile.test
+├── specs/
+│   ├── init.smoko     # one file per command / feature area
+│   ├── commands.smoko
+│   └── errors.smoko
+└── src/
+    └── ...
+```
+
+### Makefile
+
+```makefile
+smoko:
+	smoko run
+```
+
+With `build` in `.smokorc`, `smoko run` builds the image and runs the tests in one step.
+
+### DSL Reference
+
 ### Feature Declaration
 
 ```gherkin
