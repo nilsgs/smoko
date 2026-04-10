@@ -31,6 +31,20 @@ timeout = 60
 	assert.Equal(t, 60, cfg.Timeout)
 }
 
+func TestLoadWithBuild(t *testing.T) {
+	dir := t.TempDir()
+	content := `image   = "myimage:latest"
+timeout = 60
+build   = "docker build -t myimage:latest ."
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".smokorc"), []byte(content), 0644))
+	cfg, err := config.Load(dir)
+	require.NoError(t, err)
+	assert.Equal(t, "myimage:latest", cfg.Image)
+	assert.Equal(t, 60, cfg.Timeout)
+	assert.Equal(t, "docker build -t myimage:latest .", cfg.Build)
+}
+
 func TestLoadInvalidTOML(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".smokorc"), []byte("[[invalid"), 0644))

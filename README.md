@@ -191,12 +191,16 @@ Create a `.smokorc` file in the project root:
 ```toml
 image   = "myimage:latest"  # Default Docker image
 timeout = 1                 # Seconds per setup/action command
+build   = "docker build -f Dockerfile.test -t myimage:latest ."  # Optional: build image before running tests
 ```
+
+When `build` is set, smoko runs the command (from the `.smokorc` directory) before pulling images or running any scenarios. Build output streams to the terminal in real-time. Use `--no-build` to skip the build step when the image is already current.
 
 Or use CLI flags to override:
 
 ```bash
 smoko run test.smoko --image ubuntu:latest --parallel 0 --timeout 5 --verbose --fail-fast
+smoko run specs/ --no-build   # skip image build
 ```
 
 Defaults are tuned for faster feedback: `--parallel` uses auto mode by default and `--timeout` defaults to `1` second unless `.smokorc` or an explicit flag overrides it.
@@ -210,6 +214,7 @@ Defaults are tuned for faster feedback: `--parallel` uses auto mode by default a
 | `--verbose` | false | Print stdout/stderr even for passing scenarios |
 | `--fail-fast` | false | Stop after the first failed scenario |
 | `--parallel` | 0 | Number of scenarios to run concurrently (0 = auto) |
+| `--no-build` | false | Skip the build step defined in .smokorc |
 
 ## Project Structure
 

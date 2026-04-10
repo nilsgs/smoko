@@ -321,6 +321,17 @@ smoko run specs/ --parallel 0
 smoko run test.smoko --image alpine:latest
 smoko run test.smoko --verbose
 smoko run test.smoko --fail-fast
+smoko run specs/ --no-build   # skip image build even when .smokorc has build =
 ```
 
 `timeout` in `.smokorc` or `--timeout` applies to setup and action commands. The built-in default is `1` second.
+
+## .smokorc
+
+```toml
+image   = "myimage:latest"
+timeout = 5
+build   = "docker build -f Dockerfile.test -t myimage:latest ."
+```
+
+When `build` is set, smoko runs the command before pulling or running any scenarios. Build output streams to the terminal. Use `--no-build` to skip when the image is already current.

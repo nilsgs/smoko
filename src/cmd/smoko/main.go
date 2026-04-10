@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -51,13 +52,14 @@ func runCmd() *cobra.Command {
 	var verbose bool
 	var failFast bool
 	var parallel int
+	var noBuild bool
 
 	cmd := &cobra.Command{
 		Use:   "run <path>",
 		Short: "Run .smoko test files",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTests(args[0], image, timeout, cmd.Flags().Changed("timeout"), verbose, failFast, parallel)
+			return runTests(args[0], image, timeout, cmd.Flags().Changed("timeout"), verbose, failFast, parallel, noBuild)
 		},
 	}
 
@@ -66,11 +68,12 @@ func runCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Print stdout/stderr even for passing scenarios")
 	cmd.Flags().BoolVar(&failFast, "fail-fast", false, "Stop after the first failed scenario")
 	cmd.Flags().IntVar(&parallel, "parallel", 0, "Number of scenarios to run in parallel (0 = auto)")
+	cmd.Flags().BoolVar(&noBuild, "no-build", false, "Skip the build step defined in .smokorc")
 
 	return cmd
 }
 
-func runTests(path, imageFlag string, timeoutFlag int, timeoutFlagSet bool, verbose, failFast bool, parallel int) error {
+func runTests(path, imageFlag string, timeoutFlag int, timeoutFlagSet bool, verbose, failFast bool, parallel int, noBuild bool) error {
 	// Determine working dir for config
 	wd, err := os.Getwd()
 	if err != nil {
@@ -79,6 +82,13 @@ func runTests(path, imageFlag string, timeoutFlag int, timeoutFlagSet bool, verb
 	cfg, err := config.Load(wd)
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
+	}
+
+	// Run build command if configured
+	if cfg.Build != "" && !noBuild {
+		if err := runBuild(cfg.Build, wd); err != nil {
+			return err
+		}
 	}
 
 	// Resolve timeout
@@ -341,6 +351,25 @@ func resolveImage(flagImg, featureImg, configImg string) string {
 		return featureImg
 	}
 	return configImg
+}
+
+// runBuild executes the configured build command, streaming output to the
+// terminal so users can see progress. dir is the .smokorc directory.
+func runBuild(command, dir string) error {
+	fmt.Fprintf(os.Stderr, "Building: %s\n", command)
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/C", command)
+	} else {
+		cmd = exec.Command("sh", "-c", command)
+	}
+	cmd.Dir = dir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("build failed: %w", err)
+	}
+	return nil
 }
 
 func collectFiles(path string) ([]string, error) {

@@ -12,6 +12,7 @@ import (
 type Config struct {
 	Image   string `toml:"image"`
 	Timeout int    `toml:"timeout"` // seconds per setup/action command; 0 means use default
+	Build   string `toml:"build"`   // command to build the Docker image before running tests
 }
 
 const DefaultTimeout = 1

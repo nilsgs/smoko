@@ -1,5 +1,7 @@
 # 3 — Build Integration
 
+STATUS: DONE
+
 ## Problem
 
 Every smoko consumer follows the same two-step workflow:
