@@ -1,8 +1,15 @@
-# Copilot Instructions for Smoko
+# Smoko
 
-## Project Context
+Smoke testing tool for CLI apps. BDD-style `.smoko` DSL executed in isolated Docker containers. Module: `github.com/nskut/smoko`. For DSL usage and examples, see [`skills/smoko/SKILL.md`](skills/smoko/SKILL.md).
 
-Smoko is a platform-agnostic smoke testing tool for CLI applications. It allows developers to write BDD-style test specifications in `.smoko` files and execute them in isolated Docker containers.
+## Commands
+
+```bash
+make build           # binary → repo root
+make install         # → GOPATH/bin
+make test-local      # unit tests (no Docker)
+make test            # unit tests in Docker
+```
 
 ## Architecture Overview
 
@@ -137,24 +144,6 @@ Exit code: 0 (pass), 1 (fail), 2 (error)
 - Commands are wrapped: `source .smoko_env; <user-command>` to inject env vars
 - File writes use tar archives (no host mounts for isolation)
 - Exit codes are captured; timeouts default to 1s (configurable)
-
-## Extending the Tool
-
-### New Step Types
-
-Add new step parsing patterns to `executor.go` (Given/When) or `assertions.go` (Then).
-
-### New Assertion Patterns
-
-Common pattern: parse step text with regex, compare actual vs expected, return Result{Pass, Message}.
-
-### JSON Assertions
-
-Supported via JSONPath (uses `github.com/theory/jsonpath`). Pattern: parse step text for source (`output`/`stdout`/`stderr`/`file`), JSONPath expression, and expected value; unmarshal actual output; evaluate path.
-
-### Parallel Execution
-
-Scenarios run concurrently when `--parallel N` (or `--parallel 0` for auto) is passed. Each scenario already gets its own container so isolation is preserved. Implementation uses a semaphore channel (`chan struct{}` of size N), `sync.WaitGroup`, and `atomic.Bool` for fail-fast. Reporter is mutex-guarded. Image pulls happen sequentially upfront (before parallel dispatch).
 
 ## Testing Guidelines
 

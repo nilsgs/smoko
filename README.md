@@ -73,8 +73,6 @@ smoko run --list
 smoko run specs/ --list
 ```
 
-## DSL Reference
-
 ## Setting Up Smoko for Your Project
 
 ### Dockerfile.test Template
@@ -131,7 +129,7 @@ smoko:
 
 With `build` in `.smokorc`, `smoko run` builds the image and runs the tests in one step.
 
-### DSL Reference
+## DSL Reference
 
 ### Feature Declaration
 
@@ -308,43 +306,6 @@ smoko/
         └── reporter/
 ```
 
-## Development
-
-### Build
-
-```bash
-make build        # build for current platform → smoko.exe
-make install      # go install to GOPATH/bin
-make cross        # cross-compile for all platforms → dist/
-make clean        # remove build artifacts
-```
-
-### Test
-
-```bash
-make test-local   # run unit tests locally
-make test         # run unit tests inside a Docker container
-```
-
-### Version
-
-The version is read from `VERSION` at build time and embedded in the binary via `-ldflags`:
-
-```
-$ smoko --version
-0.1.0+3dd1ab4
-```
-
-To release a new version, update `VERSION` and rebuild.
-
-### Architecture
-
-- **Parser**: Lexer and recursive-descent parser for `.smoko` files
-- **Docker**: SDK wrapper managing container lifecycle
-- **Executor**: Runs Given/When steps, coordinates test execution
-- **Assertions**: Evaluates Then/And assertions
-- **Reporter**: Formats and prints test results with colors
-
 ## Examples
 
 ### Example 1: File Processing
@@ -401,6 +362,43 @@ Feature: JSON File Generation
     Then file "result.json" as JSON at path "$.items" equals:
       [1, 2, 3]
 ```
+
+## Development
+
+### Build
+
+```bash
+make build        # build for current platform → smoko.exe
+make install      # go install to GOPATH/bin
+make cross        # cross-compile for all platforms → dist/
+make clean        # remove build artifacts
+```
+
+### Test
+
+```bash
+make test-local   # run unit tests locally
+make test         # run unit tests inside a Docker container
+```
+
+### Version
+
+The version is read from `VERSION` at build time and embedded in the binary via `-ldflags`:
+
+```
+$ smoko --version
+0.1.0+3dd1ab4
+```
+
+To release a new version, update `VERSION` and rebuild.
+
+### Architecture
+
+- **Parser**: Lexer and recursive-descent parser for `.smoko` files
+- **Docker**: SDK wrapper managing container lifecycle
+- **Executor**: Runs Given/When steps, coordinates test execution
+- **Assertions**: Evaluates Then/And assertions
+- **Reporter**: Formats and prints test results with colors
 
 ## License
 

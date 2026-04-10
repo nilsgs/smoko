@@ -5,7 +5,7 @@ description: "Write, review, and debug Smoko `.smoko` smoke tests for CLI applic
 
 # Smoko
 
-Use this guide to write correct Smoko scenarios and stay within the DSL the tool actually supports.
+Use this guide to write correct Smoko scenarios and stay within the DSL the tool actually supports. For repository architecture and extension patterns, see [`AGENTS.md`](../../AGENTS.md).
 
 ## Core model
 
@@ -14,7 +14,7 @@ Use this guide to write correct Smoko scenarios and stay within the DSL the tool
 - Expect the working directory inside the container to be `/smoko-work`.
 - Execute `Given` steps in source order.
 - Use a single `When` step as the action under test.
-- Use `Then` and inherited `And` or `But` steps for assertions.
+- Use `Then` and inherited `And` or `But` steps for assertions. `And`/`But` inherit their type from the preceding keyword (`Given`, `When`, or `Then`).
 
 ## Supported structure
 
@@ -108,14 +108,6 @@ Given I run "my-cli info --json"
 And I save JSON path "$.name" as $APP_NAME
 And I save JSON path "$.version" as $APP_VERSION
 ```
-
-### Declare an empty working directory
-
-```gherkin
-Given an empty working directory
-```
-
-This is effectively a no-op because each scenario already starts in a fresh container.
 
 ## When
 
@@ -327,30 +319,6 @@ Scenario: CLI respects environment variables
   Then output contains "Debug mode enabled"
 ```
 
-### JSON output assertions
-
-```gherkin
-Scenario: CLI emits nested JSON
-  Given a file "stdout.json" with content:
-    {"user":{"name":"Alice","active":true}}
-  When I run "cat stdout.json"
-  Then exit code is 0
-  Then output as JSON at path "$.user.name" equals "Alice"
-  Then output as JSON at path "$.user.active" equals true
-```
-
-### JSON file assertions
-
-```gherkin
-Scenario: CLI writes a JSON file
-  Given a file "result.json" with content:
-    {"items":[1,2,3]}
-  When I run "cat result.json"
-  Then exit code is 0
-  Then file "result.json" as JSON at path "$.items" equals:
-    [1, 2, 3]
-```
-
 ## Debugging guidance
 
 - If a `Given` step fails before `When`, inspect the setup command or path assumptions first.
@@ -379,7 +347,7 @@ smoko run test.smoko --image alpine:latest
 smoko run test.smoko --verbose
 smoko run test.smoko --fail-fast
 smoko run specs/ --list    # list scenarios without running
-smoko run specs/ --no-build   # skip image build even when .smokorc has build =
+smoko run specs/ --no-build   # skip build step even if .smokorc has build = "..."
 ```
 
 `timeout` in `.smokorc` or `--timeout` applies to setup and action commands. The built-in default is `1` second.
