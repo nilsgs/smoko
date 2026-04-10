@@ -14,6 +14,7 @@ import (
 
 	"github.com/nskut/smoko/internal/docker"
 	"github.com/nskut/smoko/internal/executor"
+	"github.com/nskut/smoko/internal/hints"
 	"github.com/nskut/smoko/internal/parser"
 )
 
@@ -566,7 +567,48 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 		return pass()
 	}
 
+	if suggestion := hints.Suggest(text, knownThenPatterns); suggestion != "" {
+		return fail("unknown Then assertion: %q\n  → did you mean: %q?", text, suggestion)
+	}
 	return fail("unknown Then assertion: %q", text)
+}
+var knownThenPatterns = []string{
+	`exit code is 0`,
+	`exit code is not 0`,
+	`output contains "text"`,
+	`output does not contain "text"`,
+	`stdout contains "text"`,
+	`stderr contains "text"`,
+	`stdout does not contain "text"`,
+	`stderr does not contain "text"`,
+	`output matches pattern "regex"`,
+	`stdout matches pattern "regex"`,
+	`stderr matches pattern "regex"`,
+	`output does not match pattern "regex"`,
+	`stdout does not match pattern "regex"`,
+	`stderr does not match pattern "regex"`,
+	`output equals "text"`,
+	`stdout equals "text"`,
+	`stderr equals "text"`,
+	`output does not equal "text"`,
+	`output is empty`,
+	`output is not empty`,
+	`stdout is empty`,
+	`stderr is empty`,
+	`file "path" exists`,
+	`file "path" does not exist`,
+	`directory "path" exists`,
+	`file "path" contains "text"`,
+	`file "path" does not contain "text"`,
+	`file "path" matches pattern "regex"`,
+	`file "path" equals "text"`,
+	`file "path" is empty`,
+	`file "path" is not empty`,
+	`output as JSON at path "$.field" exists`,
+	`stdout as JSON at path "$.field" exists`,
+	`output as JSON at path "$.field" equals "value"`,
+	`file "path" as JSON at path "$.field" exists`,
+	`file "path" as JSON at path "$.field" equals "value"`,
 }
 
 func evaluateExistsResult(kind, path string, negate bool, fr docker.FSResult) Result {

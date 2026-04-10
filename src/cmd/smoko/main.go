@@ -54,12 +54,24 @@ func runCmd() *cobra.Command {
 	var parallel int
 	var noBuild bool
 
+	var list bool
+
 	cmd := &cobra.Command{
-		Use:   "run <path>",
+		Use:   "run [path]",
 		Short: "Run .smoko test files",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTests(args[0], image, timeout, cmd.Flags().Changed("timeout"), verbose, failFast, parallel, noBuild)
+			path := "specs"
+			if len(args) > 0 {
+				path = args[0]
+			}
+			if _, err := os.Stat(path); err != nil {
+				if len(args) == 0 {
+					return fmt.Errorf("no path given and no specs/ directory found — run 'smoko run <path>'")
+				}
+				return fmt.Errorf("path %q not found", path)
+			}
+			return runTests(path, image, timeout, cmd.Flags().Changed("timeout"), verbose, failFast, parallel, noBuild, list)
 		},
 	}
 
@@ -69,11 +81,12 @@ func runCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&failFast, "fail-fast", false, "Stop after the first failed scenario")
 	cmd.Flags().IntVar(&parallel, "parallel", 0, "Number of scenarios to run in parallel (0 = auto)")
 	cmd.Flags().BoolVar(&noBuild, "no-build", false, "Skip the build step defined in .smokorc")
+	cmd.Flags().BoolVar(&list, "list", false, "List scenarios without running them")
 
 	return cmd
 }
 
-func runTests(path, imageFlag string, timeoutFlag int, timeoutFlagSet bool, verbose, failFast bool, parallel int, noBuild bool) error {
+func runTests(path, imageFlag string, timeoutFlag int, timeoutFlagSet bool, verbose, failFast bool, parallel int, noBuild, list bool) error {
 	// Determine working dir for config
 	wd, err := os.Getwd()
 	if err != nil {
@@ -107,10 +120,6 @@ func runTests(path, imageFlag string, timeoutFlag int, timeoutFlagSet bool, verb
 	}
 
 	// Parse all files
-	type parsedFile struct {
-		name     string
-		features []parser.Feature
-	}
 	var parsed []parsedFile
 	for _, f := range files {
 		data, err := os.ReadFile(f)
@@ -122,6 +131,11 @@ func runTests(path, imageFlag string, timeoutFlag int, timeoutFlagSet bool, verb
 			return fmt.Errorf("parse %s: %w", f, err)
 		}
 		parsed = append(parsed, parsedFile{name: f, features: feats})
+	}
+
+	// --list: print scenarios and exit without running Docker
+	if list {
+		return listScenarios(parsed)
 	}
 
 	// Docker client
@@ -392,4 +406,28 @@ func collectFiles(path string) ([]string, error) {
 		files = append(files, filepath.Join(path, e.Name()))
 	}
 	return files, nil
+}
+
+type parsedFile struct {
+	name     string
+	features []parser.Feature
+}
+
+func listScenarios(files []parsedFile) error {
+	totalFeatures := 0
+	totalScenarios := 0
+	for _, pf := range files {
+		fmt.Printf("%s\n", pf.name)
+		for _, f := range pf.features {
+			totalFeatures++
+			fmt.Printf("  Feature: %s\n", f.Name)
+			for _, s := range f.Scenarios {
+				totalScenarios++
+				fmt.Printf("    · %s\n", s.Name)
+			}
+		}
+		fmt.Println()
+	}
+	fmt.Printf("%d feature(s), %d scenario(s)\n", totalFeatures, totalScenarios)
+	return nil
 }

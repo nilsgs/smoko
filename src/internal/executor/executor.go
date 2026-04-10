@@ -11,6 +11,7 @@ import (
 	"github.com/theory/jsonpath"
 
 	"github.com/nskut/smoko/internal/docker"
+	"github.com/nskut/smoko/internal/hints"
 	"github.com/nskut/smoko/internal/parser"
 )
 
@@ -121,6 +122,9 @@ func RunWhen(ctx context.Context, dc dockerRunner, containerID string, step pars
 	} else if m := reRun.FindStringSubmatch(text); m != nil {
 		command = m[1]
 	} else {
+		if suggestion := hints.Suggest(text, knownWhenPatterns); suggestion != "" {
+			return nil, fmt.Errorf("unknown When step: %q\n  → did you mean: %q?", text, suggestion)
+		}
 		return nil, fmt.Errorf("unknown When step: %q", text)
 	}
 
@@ -345,7 +349,29 @@ func classifyGivenStep(step parser.Step) (givenAction, error) {
 		}, nil
 	}
 
+	if suggestion := hints.Suggest(text, knownGivenPatterns); suggestion != "" {
+		return givenAction{}, fmt.Errorf("unknown Given step: %q\n  → did you mean: %q?", text, suggestion)
+	}
 	return givenAction{}, fmt.Errorf("unknown Given step: %q", text)
+}
+
+var knownWhenPatterns = []string{
+	`I run "command"`,
+	`I run "command" with input "stdin"`,
+	`I run "command" expecting exit code 1`,
+}
+
+var knownGivenPatterns = []string{
+	`a file "path" with content:`,
+	`a file "path" exists`,
+	`the directory "path" exists`,
+	`directory "path" exists`,
+	`an empty working directory`,
+	`environment variable "NAME" is set to "value"`,
+	`I run "command"`,
+	`I save output as $VAR`,
+	`I save JSON path "$.field" as $VAR`,
+	`I save pattern "regex" as $VAR`,
 }
 
 func executeGivenOp(ctx context.Context, dc dockerRunner, containerID string, op givenOp, timeout time.Duration) error {

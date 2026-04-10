@@ -1,5 +1,7 @@
 # 4 — DX Improvements
 
+STATUS: DONE
+
 Three small, independent improvements to developer experience.
 
 ---

@@ -317,10 +317,12 @@ Scenario: CLI writes a JSON file
 ```bash
 smoko run test.smoko
 smoko run specs/
+smoko run             # defaults to specs/ directory
 smoko run specs/ --parallel 0
 smoko run test.smoko --image alpine:latest
 smoko run test.smoko --verbose
 smoko run test.smoko --fail-fast
+smoko run specs/ --list    # list scenarios without running
 smoko run specs/ --no-build   # skip image build even when .smokorc has build =
 ```
 

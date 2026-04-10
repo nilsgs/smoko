@@ -56,6 +56,9 @@ Feature: Hello World CLI
 ### Running Tests
 
 ```bash
+# Run all tests in the default specs/ directory
+smoko run
+
 # Run a single test file
 smoko run test.smoko
 
@@ -64,6 +67,10 @@ smoko run specs/
 
 # With options
 smoko run test.smoko --image myimage:latest --verbose --fail-fast
+
+# List scenarios without running
+smoko run --list
+smoko run specs/ --list
 ```
 
 ## DSL Reference
@@ -215,6 +222,7 @@ Defaults are tuned for faster feedback: `--parallel` uses auto mode by default a
 | `--fail-fast` | false | Stop after the first failed scenario |
 | `--parallel` | 0 | Number of scenarios to run concurrently (0 = auto) |
 | `--no-build` | false | Skip the build step defined in .smokorc |
+| `--list` | false | List scenarios without running them |
 
 ## Project Structure
 
