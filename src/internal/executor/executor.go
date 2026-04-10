@@ -2,10 +2,13 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/theory/jsonpath"
 
 	"github.com/nskut/smoko/internal/docker"
 	"github.com/nskut/smoko/internal/parser"
@@ -41,15 +44,36 @@ func WriteEnvFile(ctx context.Context, dc dockerRunner, containerID string, vars
 
 // RunGivenSteps executes all Given steps against the container, batching file
 // operations only when they are adjacent so the declared order is preserved.
-func RunGivenSteps(ctx context.Context, dc dockerRunner, containerID string, steps []parser.Step, timeout time.Duration) error {
+// env holds the initial environment variables; any captured variables are
+// appended and written to .smoko_env so subsequent steps can use them.
+func RunGivenSteps(ctx context.Context, dc dockerRunner, containerID string, steps []parser.Step, timeout time.Duration, env []string) error {
 	ops, err := buildGivenOps(steps)
 	if err != nil {
 		return err
 	}
 
+	allEnv := append([]string(nil), env...)
+
 	for _, op := range ops {
-		if err := executeGivenOp(ctx, dc, containerID, op, timeout); err != nil {
-			return err
+		if op.kind == givenOpRunCommand {
+			stdout, err := runGivenCommandCapture(ctx, dc, containerID, op.command, timeout)
+			if err != nil {
+				return fmt.Errorf("Given %q: %w", op.stepText, err)
+			}
+			for _, cap := range op.captures {
+				value, err := extractCaptureValue(cap, stdout)
+				if err != nil {
+					return fmt.Errorf("Given %q: %w", cap.stepText, err)
+				}
+				allEnv = append(allEnv, cap.varName+"="+value)
+				if err := WriteEnvFile(ctx, dc, containerID, allEnv); err != nil {
+					return fmt.Errorf("write env after capture: %w", err)
+				}
+			}
+		} else {
+			if err := executeGivenOp(ctx, dc, containerID, op, timeout); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -58,19 +82,8 @@ func RunGivenSteps(ctx context.Context, dc dockerRunner, containerID string, ste
 
 // RunGiven executes a single Given step against the container.
 // Prefer RunGivenSteps for ordered, batched execution.
-func RunGiven(ctx context.Context, dc dockerRunner, containerID string, step parser.Step, timeout time.Duration) error {
-	ops, err := buildGivenOps([]parser.Step{step})
-	if err != nil {
-		return err
-	}
-
-	for _, op := range ops {
-		if err := executeGivenOp(ctx, dc, containerID, op, timeout); err != nil {
-			return err
-		}
-	}
-
-	return nil
+func RunGiven(ctx context.Context, dc dockerRunner, containerID string, step parser.Step, timeout time.Duration, env []string) error {
+	return RunGivenSteps(ctx, dc, containerID, []parser.Step{step}, timeout, env)
 }
 
 // CollectEnvVars scans Given steps for environment variable declarations and
@@ -146,7 +159,24 @@ const (
 	givenFile
 	givenDir
 	givenRun
+	givenSave // I save output/JSON path/pattern as $VAR
 )
+
+type captureKind int
+
+const (
+	captureOutput captureKind = iota
+	captureJSONPath
+	capturePattern
+)
+
+type captureSpec struct {
+	kind     captureKind
+	varName  string
+	jsonPath string
+	pattern  string
+	stepText string
+}
 
 type givenAction struct {
 	kind     givenKind
@@ -154,6 +184,7 @@ type givenAction struct {
 	file     docker.FileEntry
 	path     string
 	command  string
+	capture  *captureSpec
 }
 
 type givenOpKind int
@@ -170,6 +201,7 @@ type givenOp struct {
 	files    []docker.FileEntry
 	path     string
 	command  string
+	captures []captureSpec // non-nil only for givenOpRunCommand
 }
 
 func buildGivenOps(steps []parser.Step) ([]givenOp, error) {
@@ -214,6 +246,11 @@ func buildGivenOps(steps []parser.Step) ([]givenOp, error) {
 				stepText: action.stepText,
 				command:  action.command,
 			})
+		case givenSave:
+			if len(pendingFiles) > 0 || len(ops) == 0 || ops[len(ops)-1].kind != givenOpRunCommand {
+				return nil, fmt.Errorf("save step %q must immediately follow a 'I run' step", action.stepText)
+			}
+			ops[len(ops)-1].captures = append(ops[len(ops)-1].captures, *action.capture)
 		}
 	}
 
@@ -270,6 +307,44 @@ func classifyGivenStep(step parser.Step) (givenAction, error) {
 		return givenAction{kind: givenNoop, stepText: text}, nil
 	}
 
+	if m := reSaveOutput.FindStringSubmatch(text); m != nil {
+		return givenAction{
+			kind:     givenSave,
+			stepText: text,
+			capture: &captureSpec{
+				kind:     captureOutput,
+				varName:  m[1],
+				stepText: text,
+			},
+		}, nil
+	}
+
+	if m := reSaveJSONPath.FindStringSubmatch(text); m != nil {
+		return givenAction{
+			kind:     givenSave,
+			stepText: text,
+			capture: &captureSpec{
+				kind:     captureJSONPath,
+				varName:  m[2],
+				jsonPath: unescapeGivenString(m[1]),
+				stepText: text,
+			},
+		}, nil
+	}
+
+	if m := reSavePattern.FindStringSubmatch(text); m != nil {
+		return givenAction{
+			kind:     givenSave,
+			stepText: text,
+			capture: &captureSpec{
+				kind:     capturePattern,
+				varName:  m[2],
+				pattern:  unescapeGivenString(m[1]),
+				stepText: text,
+			},
+		}, nil
+	}
+
 	return givenAction{}, fmt.Errorf("unknown Given step: %q", text)
 }
 
@@ -284,7 +359,7 @@ func executeGivenOp(ctx context.Context, dc dockerRunner, containerID string, op
 			return fmt.Errorf("Given %q: %w", op.stepText, err)
 		}
 	case givenOpRunCommand:
-		if err := runGivenCommand(ctx, dc, containerID, op.command, timeout); err != nil {
+		if _, err := runGivenCommandCapture(ctx, dc, containerID, op.command, timeout); err != nil {
 			return fmt.Errorf("Given %q: %w", op.stepText, err)
 		}
 	}
@@ -292,15 +367,15 @@ func executeGivenOp(ctx context.Context, dc dockerRunner, containerID string, op
 	return nil
 }
 
-func runGivenCommand(ctx context.Context, dc dockerRunner, containerID, command string, timeout time.Duration) error {
+func runGivenCommandCapture(ctx context.Context, dc dockerRunner, containerID, command string, timeout time.Duration) (string, error) {
 	stdout, stderr, exitCode, err := dc.ExecCommand(ctx, containerID, docker.WorkDir(), wrapCommand(command), "", timeout)
 	if err != nil {
-		return fmt.Errorf("setup command %q: %w", command, err)
+		return "", fmt.Errorf("setup command %q: %w", command, err)
 	}
 	if exitCode != 0 {
-		return fmt.Errorf("%s", formatCommandFailure(command, exitCode, stdout, stderr))
+		return "", fmt.Errorf("%s", formatCommandFailure(command, exitCode, stdout, stderr))
 	}
-	return nil
+	return stdout, nil
 }
 
 func wrapCommand(command string) string {
@@ -327,7 +402,100 @@ var (
 	reEnvVar          = regexp.MustCompile(`^environment variable "([^"]+)" is set to "([^"]*)"$`)
 	reGivenRun        = regexp.MustCompile(`^I run "([^"]+)"$`)
 
+	reSaveOutput   = regexp.MustCompile(`^I save output as \$([A-Za-z_][A-Za-z0-9_]*)$`)
+	reSaveJSONPath = regexp.MustCompile(`^I save JSON path "((?:[^"\\]|\\.)*)" as \$([A-Za-z_][A-Za-z0-9_]*)$`)
+	reSavePattern  = regexp.MustCompile(`^I save pattern "((?:[^"\\]|\\.)*)" as \$([A-Za-z_][A-Za-z0-9_]*)$`)
+
 	reRun              = regexp.MustCompile(`^I run "([^"]+)"$`)
 	reRunWithInput     = regexp.MustCompile(`^I run "([^"]+)" with input "([^"]*)"$`)
 	reRunExpectingCode = regexp.MustCompile(`^I run "([^"]+)" expecting exit code (\d+)$`)
 )
+
+// extractCaptureValue extracts the value to store given the capture spec and the stdout of the preceding run.
+func extractCaptureValue(spec captureSpec, stdout string) (string, error) {
+	switch spec.kind {
+	case captureOutput:
+		return strings.TrimSpace(stdout), nil
+	case captureJSONPath:
+		return extractJSONPathValue(stdout, spec.jsonPath)
+	case capturePattern:
+		return extractPatternValue(stdout, spec.pattern)
+	default:
+		return "", fmt.Errorf("unknown capture kind")
+	}
+}
+
+func extractJSONPathValue(raw, pathExpr string) (string, error) {
+	var value any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &value); err != nil {
+		return "", fmt.Errorf("output is not valid JSON: %v", err)
+	}
+	path, err := jsonpath.Parse(pathExpr)
+	if err != nil {
+		return "", fmt.Errorf("invalid JSON path %q: %v", pathExpr, err)
+	}
+	nodes := path.Select(value)
+	if len(nodes) == 0 {
+		return "", fmt.Errorf("JSON path %q not found in output", pathExpr)
+	}
+	return jsonValueToString(nodes[0]), nil
+}
+
+func extractPatternValue(stdout, pattern string) (string, error) {
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return "", fmt.Errorf("invalid regex %q: %v", pattern, err)
+	}
+	m := re.FindStringSubmatch(strings.TrimSpace(stdout))
+	if m == nil {
+		return "", fmt.Errorf("pattern %q did not match output", pattern)
+	}
+	if len(m) < 2 {
+		return "", fmt.Errorf("pattern %q must contain at least one capture group", pattern)
+	}
+	return m[1], nil
+}
+
+func jsonValueToString(v any) string {
+	if v == nil {
+		return ""
+	}
+	switch val := v.(type) {
+	case string:
+		return val
+	case bool:
+		if val {
+			return "true"
+		}
+		return "false"
+	case float64:
+		if val == float64(int64(val)) {
+			return fmt.Sprintf("%d", int64(val))
+		}
+		return fmt.Sprintf("%g", val)
+	default:
+		data, _ := json.Marshal(v)
+		return string(data)
+	}
+}
+
+// unescapeGivenString replaces \" with " and \\ with \ in a captured step string.
+func unescapeGivenString(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			switch s[i+1] {
+			case '"':
+				b.WriteByte('"')
+				i++
+				continue
+			case '\\':
+				b.WriteByte('\\')
+				i++
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}

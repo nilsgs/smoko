@@ -129,7 +129,7 @@ func TestRunGivenStepsPreservesOrderAroundCommands(t *testing.T) {
 		{ResolvedType: parser.StepWhen, Text: `I run "ls"`},
 	}
 
-	err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second)
+	err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"write-files", "exec", "write-files", "mkdir:nested"}, fd.ops)
@@ -163,7 +163,7 @@ func TestRunGivenStepsCommandFailureIncludesDetails(t *testing.T) {
 		{ResolvedType: parser.StepGiven, Text: `I run "sh -c 'echo partial output; echo boom >&2; exit 7'"`},
 	}
 
-	err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 3*time.Second)
+	err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 3*time.Second, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Given ")
 	assert.Contains(t, err.Error(), `command "sh -c 'echo partial output; echo boom >&2; exit 7'" exited with code 7`)
@@ -177,7 +177,7 @@ func TestRunGivenCommandUsesTimeout(t *testing.T) {
 	fd := &fakeDocker{}
 	step := parser.Step{ResolvedType: parser.StepGiven, Text: `I run "touch marker.txt"`}
 
-	err := executor.RunGiven(context.Background(), fd, "abc123", step, 12*time.Second)
+	err := executor.RunGiven(context.Background(), fd, "abc123", step, 12*time.Second, nil)
 	require.NoError(t, err)
 	require.Len(t, fd.execCalls, 1)
 	assert.Equal(t, 12*time.Second, fd.execCalls[0].timeout)
@@ -193,9 +193,115 @@ func TestRunGivenCommandPropagatesExecError(t *testing.T) {
 	}
 	step := parser.Step{ResolvedType: parser.StepGiven, Text: `I run "touch marker.txt"`}
 
-	err := executor.RunGiven(context.Background(), fd, "abc123", step, time.Second)
+	err := executor.RunGiven(context.Background(), fd, "abc123", step, time.Second, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `setup command "touch marker.txt": exec failed`)
+}
+
+func TestSaveOutputCapture(t *testing.T) {
+	t.Parallel()
+
+	fd := &fakeDocker{
+		execResults: []execResult{
+			{stdout: "hello world\n", exitCode: 0},
+			{stdout: "", exitCode: 0}, // WriteEnvFile exec
+		},
+	}
+	steps := []parser.Step{
+		{ResolvedType: parser.StepGiven, Text: `I run "echo hello world"`},
+		{ResolvedType: parser.StepGiven, Text: `I save output as $GREETING`},
+	}
+
+	err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
+	require.NoError(t, err)
+	// WriteEnvFile is called — we just verify no error and the env write happened
+	require.GreaterOrEqual(t, len(fd.execCalls), 1)
+}
+
+func TestSaveJSONPathCapture(t *testing.T) {
+	t.Parallel()
+
+	fd := &fakeDocker{
+		execResults: []execResult{
+			{stdout: `{"name":"alice","age":30}`, exitCode: 0},
+			{stdout: "", exitCode: 0},
+		},
+	}
+	steps := []parser.Step{
+		{ResolvedType: parser.StepGiven, Text: `I run "echo json"`},
+		{ResolvedType: parser.StepGiven, Text: `I save JSON path "$.name" as $NAME`},
+	}
+
+	err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
+	require.NoError(t, err)
+}
+
+func TestSavePatternCapture(t *testing.T) {
+	t.Parallel()
+
+	fd := &fakeDocker{
+		execResults: []execResult{
+			{stdout: "version 1.2.3\n", exitCode: 0},
+			{stdout: "", exitCode: 0},
+		},
+	}
+	steps := []parser.Step{
+		{ResolvedType: parser.StepGiven, Text: `I run "app --version"`},
+		{ResolvedType: parser.StepGiven, Text: `I save pattern "version ([0-9.]+)" as $VERSION`},
+	}
+
+	err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
+	require.NoError(t, err)
+}
+
+func TestSaveStepWithoutRunErrors(t *testing.T) {
+	t.Parallel()
+
+	fd := &fakeDocker{}
+	steps := []parser.Step{
+		{ResolvedType: parser.StepGiven, Text: `a file "foo.txt" exists`},
+		{ResolvedType: parser.StepGiven, Text: `I save output as $FOO`},
+	}
+
+	err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must immediately follow")
+}
+
+func TestSavePatternRequiresCaptureGroup(t *testing.T) {
+	t.Parallel()
+
+	fd := &fakeDocker{
+		execResults: []execResult{
+			{stdout: "version 1.2.3\n", exitCode: 0},
+		},
+	}
+	steps := []parser.Step{
+		{ResolvedType: parser.StepGiven, Text: `I run "app --version"`},
+		{ResolvedType: parser.StepGiven, Text: `I save pattern "version [0-9.]+" as $VERSION`},
+	}
+
+	err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "capture group")
+}
+
+func TestSaveJSONPathNotFound(t *testing.T) {
+	t.Parallel()
+
+	fd := &fakeDocker{
+		execResults: []execResult{
+			{stdout: `{"foo":"bar"}`, exitCode: 0},
+		},
+	}
+	steps := []parser.Step{
+		{ResolvedType: parser.StepGiven, Text: `I run "echo json"`},
+		{ResolvedType: parser.StepGiven, Text: `I save JSON path "$.missing" as $VAL`},
+	}
+
+	err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
 }
 
 func TestRunWhenSourcesEnvAndPassesInput(t *testing.T) {

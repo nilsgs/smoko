@@ -100,6 +100,26 @@ Given environment variable "VAR" is set to "value"
 
 `Given I run "..."` executes inside `/smoko-work`, sources `.smoko_env` if present, and fails the scenario immediately on a non-zero exit code.
 
+#### Capturing output as variables
+
+After a `Given I run "..."` step, you can save the output (or a part of it) into an environment variable. The variable is then available in subsequent steps via `.smoko_env`.
+
+```gherkin
+# Save trimmed stdout as a variable
+Given I run "my-cli version"
+And I save output as $VERSION
+
+# Save a JSON field
+Given I run "my-cli info --json"
+And I save JSON path "$.version" as $VERSION
+
+# Save a regex capture group
+Given I run "my-cli version"
+And I save pattern "v([0-9.]+)" as $VERSION
+```
+
+The variable becomes part of the environment for subsequent steps — you can reference it in later `Given I run` commands, `When I run`, or file content blocks using `$VERSION` (shell expansion).
+
 ### When Steps (Action)
 
 ```gherkin

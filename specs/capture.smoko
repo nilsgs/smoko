@@ -1,0 +1,29 @@
+Feature: Variable capture from Given steps
+  Image: alpine
+
+  Scenario: Save plain output as variable
+    Given I run "echo hello"
+    And I save output as $GREETING
+    When I run "sh -c 'echo $GREETING'"
+    Then the output should contain "hello"
+
+  Scenario: Save JSON path as variable
+    Given I run "echo '{\"version\":\"1.2.3\"}'"
+    And I save JSON path "$.version" as $VERSION
+    When I run "sh -c 'echo $VERSION'"
+    Then the output should contain "1.2.3"
+
+  Scenario: Save pattern as variable
+    Given I run "sh -c 'echo v1.2.3'"
+    And I save pattern "v([0-9.]+)" as $VERSION
+    When I run "sh -c 'echo $VERSION'"
+    Then the output should contain "1.2.3"
+
+  Scenario: Use captured variable in file content
+    Given I run "echo myapp"
+    And I save output as $APPNAME
+    And a file "hello.sh" with content:
+      #!/bin/sh
+      echo "Hello from $APPNAME"
+    When I run "sh hello.sh"
+    Then the output should contain "Hello from myapp"

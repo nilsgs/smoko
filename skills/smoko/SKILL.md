@@ -81,6 +81,34 @@ Behavior:
 - Fail the scenario immediately if the command exits non-zero.
 - Use this for imperative setup, not for the main behavior under test.
 
+### Capture output into a variable
+
+Immediately after a `Given I run` step, save the output (or part of it) into an environment variable for use in subsequent steps.
+
+```gherkin
+# Save trimmed stdout as a variable
+Given I run "my-cli version"
+And I save output as $VERSION
+
+# Save a JSON field from stdout
+Given I run "my-cli info --json"
+And I save JSON path "$.version" as $VERSION
+
+# Save a regex capture group (first group)
+Given I run "my-cli version"
+And I save pattern "v([0-9.]+)" as $VERSION
+```
+
+The variable is written to `.smoko_env` immediately, making it available to subsequent `Given I run`, `When I run`, and file content steps via shell expansion.
+
+Save steps must immediately follow a `Given I run` step. Multiple saves after the same run are allowed:
+
+```gherkin
+Given I run "my-cli info --json"
+And I save JSON path "$.name" as $APP_NAME
+And I save JSON path "$.version" as $APP_VERSION
+```
+
 ### Declare an empty working directory
 
 ```gherkin

@@ -1,6 +1,6 @@
 # 1 — Complete the Assertion Matrix
 
-## Problem
+> **STATUS: DONE** — Implemented in commit `e05eecb`
 
 The assertion support is inconsistent across output streams and file content:
 

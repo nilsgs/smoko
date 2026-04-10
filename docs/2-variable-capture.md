@@ -1,5 +1,7 @@
 # 2 — Variable Capture from Given Steps
 
+STATUS: DONE
+
 ## Problem
 
 When test scenarios need to chain setup commands where a later command depends on output from an earlier one, users are forced into shell-script workarounds:
