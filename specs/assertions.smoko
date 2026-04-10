@@ -1,0 +1,75 @@
+Feature: Extended Assertion Matrix
+  Testing the complete set of output and file assertions
+  Image: alpine:latest
+
+  Scenario: stdout matches pattern
+    When I run "echo 'version 1.2.3'"
+    Then stdout matches pattern "version \d+\.\d+\.\d+"
+
+  Scenario: stderr matches pattern
+    When I run "sh -c 'echo error: boom >&2'"
+    Then stderr matches pattern "error: \w+"
+
+  Scenario: stderr does not match pattern
+    When I run "echo hello"
+    Then stderr does not match pattern "panic:"
+
+  Scenario: output equals
+    When I run "echo -n hello"
+    Then output equals "hello"
+
+  Scenario: stdout equals with trimming
+    When I run "echo hello"
+    Then stdout equals "hello"
+
+  Scenario: stderr equals
+    When I run "sh -c 'echo -n err >&2'"
+    Then stderr equals "err"
+
+  Scenario: output is empty
+    When I run "true"
+    Then output is empty
+
+  Scenario: stderr is empty
+    When I run "echo hello"
+    Then stderr is empty
+
+  Scenario: stderr is not empty
+    When I run "sh -c 'echo something >&2'"
+    Then stderr is not empty
+
+  Scenario: file matches pattern
+    Given a file "VERSION" with content:
+      1.3.0
+    When I run "cat VERSION"
+    Then file "VERSION" matches pattern "^\d+\.\d+\.\d+$"
+
+  Scenario: file does not match pattern
+    Given a file "notes.txt" with content:
+      everything is fine
+    When I run "cat notes.txt"
+    Then file "notes.txt" does not match pattern "^ERROR"
+
+  Scenario: file equals
+    Given a file "VERSION" with content:
+      1.3.0
+    When I run "cat VERSION"
+    Then file "VERSION" equals "1.3.0"
+
+  Scenario: file does not equal
+    Given a file "VERSION" with content:
+      1.3.0
+    When I run "cat VERSION"
+    Then file "VERSION" does not equal "2.0.0"
+
+  Scenario: file is empty
+    Given a file "empty.txt" with content:
+
+    When I run "cat empty.txt"
+    Then file "empty.txt" is empty
+
+  Scenario: file is not empty
+    Given a file "data.txt" with content:
+      some data here
+    When I run "cat data.txt"
+    Then file "data.txt" is not empty

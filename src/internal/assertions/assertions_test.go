@@ -113,6 +113,34 @@ func TestOutputMatchesPattern(t *testing.T) {
 	assert.True(t, r.Pass)
 }
 
+func TestStdoutMatchesPattern(t *testing.T) {
+	wr := newWhenResult("version 1.2.3", "stderr text", 0)
+	step := parser.Step{Text: `stdout matches pattern "version \d+\.\d+\.\d+"`}
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	assert.True(t, r.Pass)
+}
+
+func TestStderrMatchesPattern(t *testing.T) {
+	wr := newWhenResult("stdout text", "error: boom", 0)
+	step := parser.Step{Text: `stderr matches pattern "error: \w+"`}
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	assert.True(t, r.Pass)
+}
+
+func TestStderrDoesNotMatchPattern(t *testing.T) {
+	wr := newWhenResult("stdout text", "all fine", 0)
+	step := parser.Step{Text: `stderr does not match pattern "panic:"`}
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	assert.True(t, r.Pass)
+}
+
+func TestStderrDoesNotMatchPatternFailure(t *testing.T) {
+	wr := newWhenResult("stdout text", "panic: nil pointer", 0)
+	step := parser.Step{Text: `stderr does not match pattern "panic:"`}
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	assert.False(t, r.Pass)
+}
+
 func TestOutputMatchesPatternFailure(t *testing.T) {
 	wr := newWhenResult("no version here", "", 0)
 	step := parser.Step{Text: `output matches pattern "version \d+\.\d+\.\d+"`}
@@ -126,6 +154,172 @@ func TestOutputMatchesInvalidRegex(t *testing.T) {
 	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
 	assert.False(t, r.Pass)
 	assert.Contains(t, r.Message, "invalid regex")
+}
+
+func TestOutputEquals(t *testing.T) {
+	wr := newWhenResult("hello world\n", "", 0)
+	step := parser.Step{Text: `output equals "hello world"`}
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	assert.True(t, r.Pass)
+}
+
+func TestOutputDoesNotEqual(t *testing.T) {
+	wr := newWhenResult("hello world", "", 0)
+	step := parser.Step{Text: `output does not equal "goodbye"`}
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	assert.True(t, r.Pass)
+}
+
+func TestOutputEqualsFailure(t *testing.T) {
+	wr := newWhenResult("hello world", "", 0)
+	step := parser.Step{Text: `output equals "goodbye"`}
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	assert.False(t, r.Pass)
+	assert.Contains(t, r.Message, "does not equal")
+}
+
+func TestStdoutEquals(t *testing.T) {
+	wr := newWhenResult("hello\n", "some error", 0)
+	step := parser.Step{Text: `stdout equals "hello"`}
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	assert.True(t, r.Pass)
+}
+
+func TestStderrEquals(t *testing.T) {
+	wr := newWhenResult("hello", "error msg\n", 0)
+	step := parser.Step{Text: `stderr equals "error msg"`}
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	assert.True(t, r.Pass)
+}
+
+func TestOutputIsEmpty(t *testing.T) {
+	wr := newWhenResult("", "", 0)
+	step := parser.Step{Text: "output is empty"}
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	assert.True(t, r.Pass)
+}
+
+func TestOutputIsNotEmpty(t *testing.T) {
+	wr := newWhenResult("something", "", 0)
+	step := parser.Step{Text: "output is not empty"}
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	assert.True(t, r.Pass)
+}
+
+func TestOutputIsEmptyFailure(t *testing.T) {
+	wr := newWhenResult("not empty", "", 0)
+	step := parser.Step{Text: "output is empty"}
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	assert.False(t, r.Pass)
+}
+
+func TestOutputIsNotEmptyFailure(t *testing.T) {
+	wr := newWhenResult("", "", 0)
+	step := parser.Step{Text: "output is not empty"}
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	assert.False(t, r.Pass)
+}
+
+func TestStderrIsEmpty(t *testing.T) {
+	wr := newWhenResult("stdout stuff", "", 0)
+	step := parser.Step{Text: "stderr is empty"}
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "")
+	assert.True(t, r.Pass)
+}
+
+func TestFileMatchesPattern(t *testing.T) {
+	fd := &fakeDocker{readFileContent: "v1.2.3\n"}
+	step := parser.Step{Text: `file "VERSION" matches pattern "v\d+\.\d+\.\d+"`}
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	assert.True(t, r.Pass)
+}
+
+func TestFileDoesNotMatchPattern(t *testing.T) {
+	fd := &fakeDocker{readFileContent: "release notes here\n"}
+	step := parser.Step{Text: `file "notes.txt" does not match pattern "^ERROR"`}
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	assert.True(t, r.Pass)
+}
+
+func TestFileMatchesPatternFailure(t *testing.T) {
+	fd := &fakeDocker{readFileContent: "no version\n"}
+	step := parser.Step{Text: `file "VERSION" matches pattern "v\d+\.\d+\.\d+"`}
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	assert.False(t, r.Pass)
+	assert.Contains(t, r.Message, "does not match pattern")
+}
+
+func TestFileEquals(t *testing.T) {
+	fd := &fakeDocker{readFileContent: "1.3.0\n"}
+	step := parser.Step{Text: `file "VERSION" equals "1.3.0"`}
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	assert.True(t, r.Pass)
+}
+
+func TestFileDoesNotEqual(t *testing.T) {
+	fd := &fakeDocker{readFileContent: "1.3.0\n"}
+	step := parser.Step{Text: `file "VERSION" does not equal "2.0.0"`}
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	assert.True(t, r.Pass)
+}
+
+func TestFileEqualsFailure(t *testing.T) {
+	fd := &fakeDocker{readFileContent: "1.3.0\n"}
+	step := parser.Step{Text: `file "VERSION" equals "2.0.0"`}
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	assert.False(t, r.Pass)
+	assert.Contains(t, r.Message, "does not equal")
+}
+
+func TestFileIsEmpty(t *testing.T) {
+	fd := &fakeDocker{readFileContent: ""}
+	step := parser.Step{Text: `file "empty.txt" is empty`}
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	assert.True(t, r.Pass)
+}
+
+func TestFileIsNotEmpty(t *testing.T) {
+	fd := &fakeDocker{readFileContent: "some content\n"}
+	step := parser.Step{Text: `file "data.txt" is not empty`}
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	assert.True(t, r.Pass)
+}
+
+func TestFileIsEmptyFailure(t *testing.T) {
+	fd := &fakeDocker{readFileContent: "not empty"}
+	step := parser.Step{Text: `file "data.txt" is empty`}
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	assert.False(t, r.Pass)
+}
+
+func TestFileIsNotEmptyFailure(t *testing.T) {
+	fd := &fakeDocker{readFileContent: ""}
+	step := parser.Step{Text: `file "data.txt" is not empty`}
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid")
+	assert.False(t, r.Pass)
+}
+
+func TestEvaluateAllBatchesNewFileAssertions(t *testing.T) {
+	fd := &fakeDocker{
+		batchResults: []docker.FSResult{
+			{Content: "v1.2.3\n"},
+			{Content: "1.3.0\n"},
+			{Content: ""},
+			{Content: "has data"},
+		},
+	}
+	steps := []parser.Step{
+		{ResolvedType: parser.StepThen, Text: `file "VERSION" matches pattern "v\d+\.\d+\.\d+"`},
+		{ResolvedType: parser.StepThen, Text: `file "VERSION" equals "1.3.0"`},
+		{ResolvedType: parser.StepThen, Text: `file "empty.txt" is empty`},
+		{ResolvedType: parser.StepThen, Text: `file "data.txt" is not empty`},
+	}
+	results := assertions.EvaluateAll(context.Background(), steps, newWhenResult("", "", 0), fd, "cid")
+	require.Len(t, fd.batchChecks, 4)
+	assert.True(t, results[0].Pass)
+	assert.True(t, results[1].Pass)
+	assert.True(t, results[2].Pass)
+	assert.True(t, results[3].Pass)
 }
 
 func TestUnknownAssertion(t *testing.T) {

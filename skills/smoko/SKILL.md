@@ -135,10 +135,32 @@ Then stderr contains "expected stderr text"
 
 ```gherkin
 Then output matches pattern "version \\d+\\.\\d+\\.\\d+"
-Then output does not match pattern "panic:"
+Then stdout matches pattern "v\\d+\\.\\d+"
+Then stderr does not match pattern "panic:"
+Then file "output.log" matches pattern "^OK \\d+ tests$"
 ```
 
-Use Go `regexp` syntax (RE2).
+Use Go `regexp` syntax (RE2). Both `match` and `matches` are accepted.
+
+### Output equals (exact match)
+
+```gherkin
+Then output equals "exact value"
+Then stdout equals "hello"
+Then stderr does not equal "something"
+```
+
+Trims leading/trailing whitespace before comparing, so trailing newlines are ignored.
+
+### Empty / not empty
+
+```gherkin
+Then output is empty
+Then stderr is empty
+Then stdout is not empty
+Then file "out.txt" is empty
+Then file "out.txt" is not empty
+```
 
 ### JSONPath assertions
 
@@ -169,6 +191,8 @@ Then file "path/to/file.txt" does not exist
 ```gherkin
 Then file "path/to/file.txt" contains "expected content"
 Then file "path/to/file.txt" does not contain "unexpected text"
+Then file "path/to/file.txt" matches pattern "^\\d+\\.\\d+\\.\\d+$"
+Then file "path/to/file.txt" equals "exact content"
 ```
 
 Block form is also supported:

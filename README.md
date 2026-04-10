@@ -115,12 +115,18 @@ When I run "command" expecting exit code 1
 Then exit code is 0
 Then exit code is not 1
 
-# Output matching
+# Output matching (output = stdout+stderr combined; or use stdout / stderr individually)
 Then output contains "text"
 Then output does not contain "error"
-Then output matches pattern "regex.*pattern"
 Then stdout contains "message"
 Then stderr contains "error"
+Then output matches pattern "regex.*pattern"
+Then stdout matches pattern "v\d+\.\d+"
+Then stderr does not match pattern "panic:"
+Then output equals "exact value"
+Then stdout equals "exact value"
+Then output is empty
+Then stderr is not empty
 
 # JSON assertions
 Then output as JSON at path "$.user.name" exists
@@ -133,9 +139,14 @@ Then file "result.json" as JSON at path "$.items" equals:
 Then file "path/to/file" exists
 Then file "path/to/file" does not exist
 Then file "path/to/file" contains "content"
+Then file "path/to/file" matches pattern "^\d+\.\d+\.\d+$"
+Then file "path/to/file" equals "exact content"
+Then file "path/to/file" is empty
+Then file "path/to/file" is not empty
 Then directory "path/to/dir" exists
 ```
 
+`equals` trims leading/trailing whitespace before comparing (both sides), so trailing newlines are ignored.
 JSON `equals` compares parsed JSON values, not strings. Use JSON literals such as `"Alice"`, `3`, `true`, `null`, or block JSON for arrays and objects.
 
 ### Background (Optional)

@@ -78,6 +78,7 @@ func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResu
 		checkKind    string
 		path         string
 		needle       string
+		pattern      string
 		negate       bool
 		jsonPath     string
 		expectedJSON string
@@ -190,6 +191,50 @@ func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResu
 			allChecks = append(allChecks, docker.FSCheck{Kind: docker.FSCheckReadFile, Path: path})
 			continue
 		}
+
+		if m := reFileMatches.FindStringSubmatch(text); m != nil {
+			negate := strings.Contains(text, "does not match")
+			path := unescapeString(m[1])
+			refs = append(refs, checkRef{
+				stepIdx:   i,
+				globalIdx: len(allChecks),
+				checkKind: "file-matches",
+				path:      path,
+				pattern:   unescapeString(m[2]),
+				negate:    negate,
+			})
+			allChecks = append(allChecks, docker.FSCheck{Kind: docker.FSCheckReadFile, Path: path})
+			continue
+		}
+
+		if m := reFileEquals.FindStringSubmatch(text); m != nil {
+			negate := strings.Contains(text, "does not equal")
+			path := unescapeString(m[1])
+			refs = append(refs, checkRef{
+				stepIdx:   i,
+				globalIdx: len(allChecks),
+				checkKind: "file-equals",
+				path:      path,
+				needle:    unescapeString(m[2]),
+				negate:    negate,
+			})
+			allChecks = append(allChecks, docker.FSCheck{Kind: docker.FSCheckReadFile, Path: path})
+			continue
+		}
+
+		if m := reFileEmpty.FindStringSubmatch(text); m != nil {
+			negate := m[2] == "not "
+			path := unescapeString(m[1])
+			refs = append(refs, checkRef{
+				stepIdx:   i,
+				globalIdx: len(allChecks),
+				checkKind: "file-empty",
+				path:      path,
+				negate:    negate,
+			})
+			allChecks = append(allChecks, docker.FSCheck{Kind: docker.FSCheckReadFile, Path: path})
+			continue
+		}
 	}
 
 	var fsResults []docker.FSResult
@@ -230,6 +275,50 @@ func EvaluateAll(ctx context.Context, steps []parser.Step, wr *executor.WhenResu
 				results[ref.stepIdx] = fail("read file %q: %v", ref.path, fr.Err)
 			} else {
 				results[ref.stepIdx] = evaluateJSONEquals(fmt.Sprintf("file %q", ref.path), fr.Content, ref.jsonPath, ref.expectedJSON)
+			}
+		case "file-matches":
+			if fr.Err != nil {
+				results[ref.stepIdx] = fail("read file %q: %v", ref.path, fr.Err)
+			} else {
+				re, err := compileRegex(ref.pattern)
+				if err != nil {
+					results[ref.stepIdx] = fail("invalid regex %q: %v", ref.pattern, err)
+				} else {
+					matches := re.MatchString(fr.Content)
+					if ref.negate && matches {
+						results[ref.stepIdx] = fail("file %q unexpectedly matches pattern %q", ref.path, ref.pattern)
+					} else if !ref.negate && !matches {
+						results[ref.stepIdx] = fail("file %q does not match pattern %q\nActual content:\n%s", ref.path, ref.pattern, fr.Content)
+					} else {
+						results[ref.stepIdx] = pass()
+					}
+				}
+			}
+		case "file-equals":
+			if fr.Err != nil {
+				results[ref.stepIdx] = fail("read file %q: %v", ref.path, fr.Err)
+			} else {
+				eq := strings.TrimSpace(fr.Content) == strings.TrimSpace(ref.needle)
+				if ref.negate && eq {
+					results[ref.stepIdx] = fail("file %q unexpectedly equals %q", ref.path, ref.needle)
+				} else if !ref.negate && !eq {
+					results[ref.stepIdx] = fail("file %q does not equal %q\nActual content:\n%s", ref.path, ref.needle, fr.Content)
+				} else {
+					results[ref.stepIdx] = pass()
+				}
+			}
+		case "file-empty":
+			if fr.Err != nil {
+				results[ref.stepIdx] = fail("read file %q: %v", ref.path, fr.Err)
+			} else {
+				empty := strings.TrimSpace(fr.Content) == ""
+				if ref.negate && empty {
+					results[ref.stepIdx] = fail("file %q is empty but expected not empty", ref.path)
+				} else if !ref.negate && !empty {
+					results[ref.stepIdx] = fail("file %q is not empty\nActual content:\n%s", ref.path, fr.Content)
+				} else {
+					results[ref.stepIdx] = pass()
+				}
 			}
 		}
 	}
@@ -367,30 +456,114 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 	}
 
 	if m := reFileJSONExists.FindStringSubmatch(text); m != nil {
-		path := unescapeString(m[1])
-		content, err := dc.ReadFile(ctx, containerID, path)
+		filePath := unescapeString(m[1])
+		content, err := dc.ReadFile(ctx, containerID, filePath)
 		if err != nil {
-			return fail("read file %q: %v", path, err)
+			return fail("read file %q: %v", filePath, err)
 		}
-		return evaluateJSONExists(fmt.Sprintf("file %q", path), content, unescapeString(m[2]))
+		return evaluateJSONExists(fmt.Sprintf("file %q", filePath), content, unescapeString(m[2]))
 	}
 
 	if m := reFileJSONEqualsBlock.FindStringSubmatch(text); m != nil {
-		path := unescapeString(m[1])
-		content, err := dc.ReadFile(ctx, containerID, path)
+		filePath := unescapeString(m[1])
+		content, err := dc.ReadFile(ctx, containerID, filePath)
 		if err != nil {
-			return fail("read file %q: %v", path, err)
+			return fail("read file %q: %v", filePath, err)
 		}
-		return evaluateJSONEquals(fmt.Sprintf("file %q", path), content, unescapeString(m[2]), step.Block)
+		return evaluateJSONEquals(fmt.Sprintf("file %q", filePath), content, unescapeString(m[2]), step.Block)
 	}
 
 	if m := reFileJSONEqualsInline.FindStringSubmatch(text); m != nil {
-		path := unescapeString(m[1])
-		content, err := dc.ReadFile(ctx, containerID, path)
+		filePath := unescapeString(m[1])
+		content, err := dc.ReadFile(ctx, containerID, filePath)
 		if err != nil {
-			return fail("read file %q: %v", path, err)
+			return fail("read file %q: %v", filePath, err)
 		}
-		return evaluateJSONEquals(fmt.Sprintf("file %q", path), content, unescapeString(m[2]), strings.TrimSpace(m[3]))
+		return evaluateJSONEquals(fmt.Sprintf("file %q", filePath), content, unescapeString(m[2]), strings.TrimSpace(m[3]))
+	}
+
+	if m := reFileMatches.FindStringSubmatch(text); m != nil {
+		negate := strings.Contains(text, "does not match")
+		filePath := unescapeString(m[1])
+		pattern := unescapeString(m[2])
+		content, err := dc.ReadFile(ctx, containerID, filePath)
+		if err != nil {
+			return fail("read file %q: %v", filePath, err)
+		}
+		re, err := compileRegex(pattern)
+		if err != nil {
+			return fail("invalid regex %q: %v", pattern, err)
+		}
+		matches := re.MatchString(content)
+		if negate && matches {
+			return fail("file %q unexpectedly matches pattern %q", filePath, pattern)
+		}
+		if !negate && !matches {
+			return fail("file %q does not match pattern %q\nActual content:\n%s", filePath, pattern, content)
+		}
+		return pass()
+	}
+
+	if m := reFileEquals.FindStringSubmatch(text); m != nil {
+		negate := strings.Contains(text, "does not equal")
+		filePath := unescapeString(m[1])
+		expected := unescapeString(m[2])
+		content, err := dc.ReadFile(ctx, containerID, filePath)
+		if err != nil {
+			return fail("read file %q: %v", filePath, err)
+		}
+		eq := strings.TrimSpace(content) == strings.TrimSpace(expected)
+		if negate && eq {
+			return fail("file %q unexpectedly equals %q", filePath, expected)
+		}
+		if !negate && !eq {
+			return fail("file %q does not equal %q\nActual content:\n%s", filePath, expected, content)
+		}
+		return pass()
+	}
+
+	if m := reFileEmpty.FindStringSubmatch(text); m != nil {
+		negate := m[2] == "not "
+		filePath := unescapeString(m[1])
+		content, err := dc.ReadFile(ctx, containerID, filePath)
+		if err != nil {
+			return fail("read file %q: %v", filePath, err)
+		}
+		empty := strings.TrimSpace(content) == ""
+		if negate && empty {
+			return fail("file %q is empty but expected not empty", filePath)
+		}
+		if !negate && !empty {
+			return fail("file %q is not empty\nActual content:\n%s", filePath, content)
+		}
+		return pass()
+	}
+
+	if m := reOutputEquals.FindStringSubmatch(text); m != nil {
+		negate := strings.Contains(text, "does not equal")
+		expected := unescapeString(m[1])
+		haystack := combined(wr, text)
+		eq := strings.TrimSpace(haystack) == strings.TrimSpace(expected)
+		if negate && eq {
+			return fail("output unexpectedly equals %q", expected)
+		}
+		if !negate && !eq {
+			return fail("output does not equal %q\nActual output:\n%s", expected, haystack)
+		}
+		return pass()
+	}
+
+	if m := reOutputEmpty.FindStringSubmatch(text); m != nil {
+		negate := m[1] == "not "
+		haystack := combined(wr, text)
+		empty := strings.TrimSpace(haystack) == ""
+		if negate && empty {
+			return fail("output is empty but expected not empty")
+		}
+		if !negate && !empty {
+			return fail("output is not empty\nActual output:\n%s", haystack)
+		}
+		return pass()
 	}
 
 	return fail("unknown Then assertion: %q", text)
@@ -535,7 +708,9 @@ var (
 	reExitCodeIsNot = regexp.MustCompile(`^exit code is not (\d+)$`)
 
 	reOutputContains = regexp.MustCompile(`^(?:output|stdout|stderr)(?: does not)? contains? "((?:[^"\\]|\\.)*)"`)
-	reOutputMatches  = regexp.MustCompile(`^(?:output)(?: does not)? matches? pattern "((?:[^"\\]|\\.)*)"`)
+	reOutputMatches  = regexp.MustCompile(`^(?:output|stdout|stderr)(?: does not)? match(?:es)? pattern "((?:[^"\\]|\\.)*)"`)
+	reOutputEquals   = regexp.MustCompile(`^(?:output|stdout|stderr)(?: does not)? equals? "((?:[^"\\]|\\.)*)"$`)
+	reOutputEmpty    = regexp.MustCompile(`^(?:output|stdout|stderr) is (not )?empty$`)
 
 	reOutputJSONExists       = regexp.MustCompile(`^(output|stdout|stderr) as JSON at path "((?:[^"\\]|\\.)*)" exists$`)
 	reOutputJSONEqualsBlock  = regexp.MustCompile(`^(output|stdout|stderr) as JSON at path "((?:[^"\\]|\\.)*)" equals:$`)
@@ -546,6 +721,9 @@ var (
 
 	reFileContainsBlock = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"` + `(?: does not)? contains:$`)
 	reFileContains      = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"` + `(?: does not)? contains "((?:[^"\\]|\\.)*)"`)
+	reFileMatches       = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"(?: does not)? match(?:es)? pattern "((?:[^"\\]|\\.)*)"$`)
+	reFileEquals        = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"(?: does not)? equals? "((?:[^"\\]|\\.)*)"$`)
+	reFileEmpty         = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)" is (not )?empty$`)
 
 	reFileJSONExists       = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)" as JSON at path "((?:[^"\\]|\\.)*)" exists$`)
 	reFileJSONEqualsBlock  = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)" as JSON at path "((?:[^"\\]|\\.)*)" equals:$`)
