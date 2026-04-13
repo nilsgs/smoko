@@ -15,13 +15,13 @@ make test            # unit tests in Docker
 
 ### Core Components
 
-**Parser** (`internal/parser/`)
+**Parser** (`src/internal/parser/`)
 - Lexer: Line-by-line tokenization with support for multi-line indented blocks
 - Parser: Recursive-descent parser that produces an AST of Feature/Scenario/Step objects
 - Handles Gherkin-like syntax: Feature, Background, Scenario, Given/When/Then/And/But
 - Special handling: `And`/`But` inherit step type from preceding step; `#` inside indented blocks is treated as content (not comments)
 
-**Docker** (`internal/docker/`)
+**Docker** (`src/internal/docker/`)
 - Wraps Docker SDK (`github.com/docker/docker`)
 - Container lifecycle: create (with env vars), exec (with timeout), write files (via tar), read files
 - Each scenario runs in a fresh container for isolation
@@ -30,7 +30,7 @@ make test            # unit tests in Docker
 - `BatchFSCheck(ctx, containerID, []FSCheck)` runs multiple filesystem checks in one `docker exec`
 - `PullIfMissing` caches results in `sync.Map` — same image is only inspected once per run
 
-**Executor** (`internal/executor/`)
+**Executor** (`src/internal/executor/`)
 - Coordinates scenario execution:
   1. Collects environment variables from Given steps
   2. Creates container with those env vars
@@ -44,17 +44,17 @@ make test            # unit tests in Docker
 - `RunWhen(ctx, dc, containerID, step, workdir, timeout)` accepts the effective workdir returned by `RunGivenSteps`
 - Variable capture: `And I save output/JSON path/pattern as $VAR` steps append to `.smoko_env`
 - File operations are done via Docker exec/tar, not host mounts
-- Fuzzy hints: unknown Given/When steps suggest closest known pattern via `internal/hints`
+- Fuzzy hints: unknown Given/When steps suggest closest known pattern via `src/internal/hints`
 
-**Assertions** (`internal/assertions/`)
+**Assertions** (`src/internal/assertions/`)
 - Evaluates Then/And steps against captured WhenResult and container filesystem
 - Regex pattern matching via Go's `regexp` (RE2 dialect); patterns cached in `sync.Map`
 - `EvaluateAll(ctx, steps, wr, dc, containerID)` is the preferred API — batches all filesystem checks into one docker exec before evaluating
 - `Evaluate(ctx, step, wr, dc, containerID)` handles a single step (used as fallback)
 - Supports: exit codes, output contains/matches/equals/empty, file/directory existence, file content, JSON path assertions
-- Fuzzy hints: unknown Then steps suggest closest known pattern via `internal/hints`
+- Fuzzy hints: unknown Then steps suggest closest known pattern via `src/internal/hints`
 
-**Reporter** (`internal/reporter/`)
+**Reporter** (`src/internal/reporter/`)
 - Collects scenario results and prints colored output
 - Per-scenario: `✓ feature / scenario` or `✗ feature / scenario`
 - Failure details: assertion failures, actual vs expected
@@ -62,13 +62,13 @@ make test            # unit tests in Docker
 - ANSI colors detected (NO_COLOR env var, non-TTY detection)
 - Thread-safe: `Add()` is guarded by a `sync.Mutex` for use with `--parallel`
 
-**Config** (`internal/config/`)
+**Config** (`src/internal/config/`)
 - Loads `.smokorc` (TOML format)
 - Fields: `image` (string), `timeout` (int seconds), `build` (string — command to build Docker image)
 - Image resolution precedence: `--image` flag > `Image:` in .smoko > `.smokorc` default
 - When `build` is set and `--no-build` is not passed, the build command runs before image pull
 
-**Hints** (`internal/hints/`)
+**Hints** (`src/internal/hints/`)
 - `Suggest(text, patterns []string) string` — Levenshtein distance on normalised step text
 - Used by executor and assertions to suggest the closest known step pattern on unknown input
 
@@ -104,20 +104,20 @@ Exit code: 0 (pass), 1 (fail), 2 (error)
 
 ### Key Files
 
-- `cmd/smoko/main.go`: CLI entry point (Cobra), orchestrates test discovery, parallel execution, container lifecycle, reporting; `--list` flag prints scenarios without running Docker; defaults to `specs/` path
-- `internal/parser/types.go`: AST types (StepType, Step, Scenario, Feature)
-- `internal/parser/lexer.go`: Tokenization with stateful block detection
-- `internal/parser/parser.go`: Recursive-descent parser
-- `internal/docker/docker.go`: Docker SDK wrapper; includes `WriteFiles` (batched tar upload), `BatchFSCheck` (batched filesystem checks), `PullIfMissing` (with sync.Map cache)
-- `internal/executor/executor.go`: Given/When handlers; `RunGivenSteps` batches file writes, handles variable capture, tracks effective workdir and returns it; `RunWhen` accepts workdir; `knownGivenPatterns`/`knownWhenPatterns` for fuzzy hints
-- `internal/assertions/assertions.go`: Then assertion evaluators; `EvaluateAll` batches filesystem checks; regex cache via sync.Map; `knownThenPatterns` for fuzzy hints
-- `internal/hints/hints.go`: `Suggest()` function using Levenshtein distance on normalised step text
-- `internal/reporter/reporter.go`: Output formatting with colors; thread-safe `Add()` for parallel use
+- `src/cmd/smoko/main.go`: CLI entry point (Cobra), orchestrates test discovery, parallel execution, container lifecycle, reporting; `--list` flag prints scenarios without running Docker; defaults to `specs/` path
+- `src/internal/parser/types.go`: AST types (StepType, Step, Scenario, Feature)
+- `src/internal/parser/lexer.go`: Tokenization with stateful block detection
+- `src/internal/parser/parser.go`: Recursive-descent parser
+- `src/internal/docker/docker.go`: Docker SDK wrapper; includes `WriteFiles` (batched tar upload), `BatchFSCheck` (batched filesystem checks), `PullIfMissing` (with sync.Map cache)
+- `src/internal/executor/executor.go`: Given/When handlers; `RunGivenSteps` batches file writes, handles variable capture, tracks effective workdir and returns it; `RunWhen` accepts workdir; `knownGivenPatterns`/`knownWhenPatterns` for fuzzy hints
+- `src/internal/assertions/assertions.go`: Then assertion evaluators; `EvaluateAll` batches filesystem checks; regex cache via sync.Map; `knownThenPatterns` for fuzzy hints
+- `src/internal/hints/hints.go`: `Suggest()` function using Levenshtein distance on normalised step text
+- `src/internal/reporter/reporter.go`: Output formatting with colors; thread-safe `Add()` for parallel use
 
 ### Testing
 
-- `internal/parser/parser_test.go`: Parser unit tests
-- `internal/config/config_test.go`: Config unit tests
+- `src/internal/parser/parser_test.go`: Parser unit tests
+- `src/internal/config/config_test.go`: Config unit tests
 - `specs/*.smoko`: Integration fixtures (basic.smoko, files.smoko, workdir.smoko, etc.)
 
 ## Common Patterns

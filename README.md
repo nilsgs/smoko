@@ -67,11 +67,16 @@ smoko run specs/
 
 # With options
 smoko run test.smoko --image myimage:latest --verbose --fail-fast
+smoko run specs/ --output json
 
 # List scenarios without running
 smoko run --list
 smoko run specs/ --list
 ```
+
+Default output is a text report intended for terminal inspection. It prints a live status line for each completed scenario, includes scenario runtime in that line, and ends with feature timings plus the full suite runtime.
+
+Use `--output json` when the result will be parsed by another tool or agent. JSON mode writes a single structured report to stdout and includes durations for the suite, each feature, and each scenario.
 
 ## Setting Up Smoko for Your Project
 
@@ -278,6 +283,7 @@ Or use CLI flags to override:
 
 ```bash
 smoko run test.smoko --image ubuntu:latest --parallel 0 --timeout 5 --verbose --fail-fast
+smoko run specs/ --output json
 smoko run specs/ --no-build   # skip image build
 ```
 
@@ -289,11 +295,36 @@ Defaults are tuned for faster feedback: `--parallel` uses auto mode by default a
 |------|---------|-------------|
 | `--image` | (none) | Docker image to use (overrides .smokorc and inline Image:) |
 | `--timeout` | 1 | Seconds to wait for each setup/action command |
-| `--verbose` | false | Print stdout/stderr even for passing scenarios |
+| `--verbose` | false | Include stdout/stderr in the final text report, including passing scenarios |
+| `--output` | (default text) | Machine-readable output format; currently supports `json` |
 | `--fail-fast` | false | Stop after the first failed scenario |
 | `--parallel` | 0 | Number of scenarios to run concurrently (0 = auto) |
 | `--no-build` | false | Skip the build step defined in .smokorc |
 | `--list` | false | List scenarios without running them |
+
+## Report Output
+
+Default text mode is optimized for interactive runs:
+
+```text
+PASS Hello World CLI / Print greeting (118ms)
+PASS Hello World CLI / Non-zero exit code (84ms)
+
+Feature Durations:
+  Hello World CLI (2 scenarios) 202ms
+
+2 passed, 0 failed, 0 errors (2 total) in 240ms
+```
+
+When a scenario fails, Smoko prints a final `Failures:` section with the scenario location, failing step line/text, and message. When `--verbose` is enabled, stdout/stderr are emitted in a final `Verbose Output:` section rather than inline during execution.
+
+Use JSON mode for agents and tooling:
+
+```bash
+smoko run specs/ --output json
+```
+
+JSON mode emits one final document to stdout with summary counts, suite duration, feature durations, scenario durations, exit codes, streams, and assertion metadata.
 
 ## Project Structure
 

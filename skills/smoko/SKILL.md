@@ -16,6 +16,14 @@ Use this guide to write correct Smoko scenarios and stay within the DSL the tool
 - Use a single `When` step as the action under test.
 - Use `Then` and inherited `And` or `But` steps for assertions. `And`/`But` inherit their type from the preceding keyword (`Given`, `When`, or `Then`).
 
+## Output modes
+
+- Use plain `smoko run ...` when a human wants to inspect the terminal report.
+- Use `smoko run ... --output json` when another tool or agent will parse the result.
+- Default text mode includes runtime in live scenario status lines, per-feature totals, and the suite summary.
+- JSON mode emits one structured document to stdout with suite, feature, and scenario durations plus assertion metadata.
+- Prefer JSON mode for agent retries, diagnostics extraction, or any workflow that needs stable machine-readable fields.
+
 ## Supported structure
 
 ```gherkin
@@ -426,6 +434,7 @@ smoko run             # defaults to specs/ directory
 smoko run specs/ --parallel 0
 smoko run test.smoko --image alpine:latest
 smoko run test.smoko --verbose
+smoko run specs/ --output json   # preferred for agents and tooling
 smoko run test.smoko --fail-fast
 smoko run specs/ --list    # list scenarios without running
 smoko run specs/ --no-build   # skip build step even if .smokorc has build = "..."

@@ -6,8 +6,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/nskut/smoko/internal/config"
+	"github.com/nskut/smoko/internal/reporter"
 )
 
 func TestRunCmdDefaults(t *testing.T) {
@@ -15,6 +17,7 @@ func TestRunCmdDefaults(t *testing.T) {
 
 	assert.Equal(t, "1", cmd.Flags().Lookup("timeout").DefValue)
 	assert.Equal(t, "0", cmd.Flags().Lookup("parallel").DefValue)
+	assert.Equal(t, "", cmd.Flags().Lookup("output").DefValue)
 }
 
 func TestResolveTimeoutUsesBuiltInDefault(t *testing.T) {
@@ -45,4 +48,25 @@ func TestResolveWorkerCountUsesExplicitValue(t *testing.T) {
 	workers := resolveWorkerCount(3)
 
 	assert.Equal(t, 3, workers)
+}
+
+func TestParseOutputModeDefaultsToText(t *testing.T) {
+	mode, err := parseOutputMode("")
+
+	require.NoError(t, err)
+	assert.Equal(t, reporter.OutputModeText, mode)
+}
+
+func TestParseOutputModeAcceptsJSON(t *testing.T) {
+	mode, err := parseOutputMode("json")
+
+	require.NoError(t, err)
+	assert.Equal(t, reporter.OutputModeJSON, mode)
+}
+
+func TestParseOutputModeRejectsUnknownValue(t *testing.T) {
+	_, err := parseOutputMode("human")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "supported: json")
 }
