@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -107,7 +108,7 @@ func runTests(path, imageFlag string, timeoutFlag int, timeoutFlagSet bool, verb
 	}
 
 	if cfg.Build != "" && !noBuild {
-		if err := runBuild(cfg.Build, wd, outputMode); err != nil {
+		if err := runBuild(cfg.Build, wd, outputMode, verbose); err != nil {
 			return emitFatal(rep, outputMode, suiteStart, err)
 		}
 	}
@@ -288,10 +289,6 @@ func runScenario(ctx context.Context, dc *docker.Client, file string, order int,
 		ScenarioName: sc.Name,
 		ScenarioLine: sc.Line,
 	}
-	defer func() {
-		rep.Duration = time.Since(start)
-	}()
-
 	allGiven := make([]parser.Step, len(feat.Background), len(feat.Background)+len(sc.Steps))
 	copy(allGiven, feat.Background)
 	allGiven = append(allGiven, sc.Steps...)
@@ -300,9 +297,12 @@ func runScenario(ctx context.Context, dc *docker.Client, file string, order int,
 	containerID, err := dc.CreateContainer(ctx, img, env)
 	if err != nil {
 		rep.Error = fmt.Errorf("create container: %w", err)
+		rep.Duration = time.Since(start)
 		return rep
 	}
 	defer dc.RemoveContainer(ctx, containerID)
+	// Registered after RemoveContainer so it runs first (LIFO), excluding teardown from duration.
+	defer func() { rep.Duration = time.Since(start) }()
 
 	if err := executor.WriteEnvFile(ctx, dc, containerID, env); err != nil {
 		rep.Error = fmt.Errorf("write env file: %w", err)
@@ -397,7 +397,7 @@ func resolveImage(flagImg, featureImg, configImg string) string {
 	return configImg
 }
 
-func runBuild(command, dir string, outputMode reporter.OutputMode) error {
+func runBuild(command, dir string, outputMode reporter.OutputMode, verbose bool) error {
 	fmt.Fprintf(os.Stderr, "Building: %s\n", command)
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
@@ -406,12 +406,23 @@ func runBuild(command, dir string, outputMode reporter.OutputMode) error {
 		cmd = exec.Command("sh", "-c", command)
 	}
 	cmd.Dir = dir
-	if outputMode == reporter.OutputModeJSON {
-		cmd.Stdout = os.Stderr
+	if verbose {
+		if outputMode == reporter.OutputModeJSON {
+			cmd.Stdout = os.Stderr
+		} else {
+			cmd.Stdout = os.Stdout
+		}
+		cmd.Stderr = os.Stderr
 	} else {
-		cmd.Stdout = os.Stdout
+		var buf bytes.Buffer
+		cmd.Stdout = &buf
+		cmd.Stderr = &buf
+		if err := cmd.Run(); err != nil {
+			fmt.Fprint(os.Stderr, buf.String())
+			return fmt.Errorf("build failed: %w", err)
+		}
+		return nil
 	}
-	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("build failed: %w", err)
 	}
