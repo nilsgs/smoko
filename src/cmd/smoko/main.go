@@ -109,12 +109,6 @@ func runTests(path, imageFlag string, timeoutFlag int, timeoutFlagSet bool, verb
 		return emitFatal(rep, outputMode, suiteStart, fmt.Errorf("config: %w", err))
 	}
 
-	if cfg.Build != "" && !noBuild {
-		if err := runBuild(cfg.Build, wd, outputMode, verbose); err != nil {
-			return emitFatal(rep, outputMode, suiteStart, err)
-		}
-	}
-
 	timeout := resolveTimeout(cfg, timeoutFlag, timeoutFlagSet)
 	workers := resolveWorkerCount(parallel)
 
@@ -147,7 +141,7 @@ func runTests(path, imageFlag string, timeoutFlag int, timeoutFlagSet bool, verb
 	}
 
 	if cfg.Build != "" && !noBuild {
-		if err := runBuild(cfg.Build, wd, outputMode); err != nil {
+		if err := runBuild(cfg.Build, wd, outputMode, verbose); err != nil {
 			return emitFatal(rep, outputMode, suiteStart, err)
 		}
 	}

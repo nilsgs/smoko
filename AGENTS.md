@@ -62,7 +62,7 @@ make test            # unit tests in Docker
 - Per-scenario: `✓ feature / scenario` or `✗ feature / scenario`
 - Failure details: assertion failures, actual vs expected
 - Summary line: `N passed, M failed (total)`
-- Build and Docker image readiness status is written to stderr so JSON stdout remains parseable
+- Build and Docker image readiness status is written to stderr so JSON stdout remains parseable; successful build output streams only with `--verbose`, while failed builds print captured output
 - ANSI colors detected (NO_COLOR env var, non-TTY detection)
 - Thread-safe: `Add()` is guarded by a `sync.Mutex` for use with `--parallel`
 
@@ -184,9 +184,9 @@ Exit code: 0 (pass), 1 (fail), 2 (error)
 - This is correct if not indented deeper than the step keyword
 - Indent it further: `Given a file "X" with content:` (colon triggers block mode)
 
-**Issue:** Container times out
+**Issue:** Container times out or setup appears slow
 - Increase `--timeout` or set `timeout` in `.smokorc`
-- Check if image is pulling (use `--verbose`)
+- Check the Docker image readiness status lines; use `--verbose` when you need successful build command output
 - Timed-out setup/action commands fail the scenario; deferred container cleanup removes the container
 
 **Issue:** Environment variables not visible in When step

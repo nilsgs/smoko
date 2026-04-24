@@ -77,7 +77,7 @@ smoko run specs/ --list
 Default output is a text report intended for terminal inspection. It prints a live status line for each completed scenario, includes scenario runtime in that line, and ends with feature timings plus the full suite runtime.
 
 Use `--output json` when the result will be parsed by another tool or agent. JSON mode writes a single structured report to stdout and includes durations for the suite, each feature, and each scenario.
-Build and Docker image readiness status is written to stderr, so JSON mode keeps stdout parseable while still showing progress for slow builds or pulls.
+Build and Docker image readiness status is written to stderr, so JSON mode keeps stdout parseable while still showing progress for slow builds or pulls. Build command output is shown on failure, or streamed during successful builds when `--verbose` is set.
 
 ## Setting Up Smoko for Your Project
 
@@ -289,7 +289,7 @@ timeout = 1                 # Seconds per setup/action command
 build   = "docker build -f Dockerfile.test -t myimage:latest ."  # Optional: build image before running tests
 ```
 
-When `build` is set, smoko runs the command (from the `.smokorc` directory) before pulling images or running any scenarios. Build output streams to the terminal in real-time, and each unique Docker image is reported as it is checked or pulled. Use `--no-build` to skip the build step when the image is already current. `--list` validates and lists scenarios without running the build command.
+When `build` is set, smoko runs the command (from the `.smokorc` directory) before pulling images or running any scenarios. Successful build output is hidden by default and streamed when `--verbose` is set; failed builds print the captured output. Each unique Docker image is reported as it is checked or pulled. Use `--no-build` to skip the build step when the image is already current. `--list` validates and lists scenarios without running the build command.
 
 Or use CLI flags to override:
 
