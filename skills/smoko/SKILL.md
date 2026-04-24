@@ -119,7 +119,7 @@ Given I run "cp source.txt target.txt"
 ```
 
 Behavior:
-- Run the command in `/smoko-work`.
+- Run the command in the current scenario working directory, initially `/smoko-work` and later changed by `Given the working directory is`.
 - Source `.smoko_env` first if it exists.
 - Fail the scenario immediately if the command exits non-zero.
 - Use this for imperative setup, not for the main behavior under test.
@@ -142,7 +142,7 @@ Given I run "my-cli version"
 And I save pattern "v([0-9.]+)" as $VERSION
 ```
 
-The variable is written to `.smoko_env` immediately, making it available to subsequent `Given I run`, `When I run`, file content steps, and **Then/And file and directory path assertions** via `$VAR` expansion (e.g. `Then file "$OUTDIR/result.json" exists`).
+The variable is written to `.smoko_env` immediately, making it available to subsequent `Given I run` and `When I run` shell commands. Smoko also expands captured variables in **Then/And file and directory path arguments** (e.g. `Then file "$OUTDIR/result.json" exists`). File content blocks are literal; Smoko does not expand `$VAR` inside them.
 
 Save steps must immediately follow a `Given I run` step. Multiple saves after the same run are allowed:
 

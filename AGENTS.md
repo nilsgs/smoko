@@ -44,7 +44,7 @@ make test            # unit tests in Docker
 - `RunGivenSteps(ctx, dc, containerID, steps, timeout, env)` returns `(workdir string, error)` — the effective working directory after all Given steps; preferred API
 - `RunGiven` (single step) is kept for compatibility, also returns `(string, error)`
 - `RunWhen(ctx, dc, containerID, step, workdir, timeout)` accepts the effective workdir returned by `RunGivenSteps`
-- Variable capture: `And I save output/JSON path/pattern as $VAR` steps append to `.smoko_env`
+- Variable capture: `And I save output/JSON path/pattern as $VAR` steps append to `.smoko_env`; captured variables are available to shell commands and expanded in assertion path arguments, but setup file content blocks are literal
 - File operations are done via Docker exec/tar, not host mounts
 - Fuzzy hints: unknown Given/When steps suggest closest known pattern via `src/internal/hints`
 

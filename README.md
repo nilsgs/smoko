@@ -200,7 +200,7 @@ Given I run "my-cli version"
 And I save pattern "v([0-9.]+)" as $VERSION
 ```
 
-The variable becomes part of the environment for subsequent steps — you can reference it in later `Given I run` commands, `When I run`, file content blocks, and **Then/And file and directory path assertions** using `$VERSION` (e.g. `Then file "$OUTDIR/result.json" exists`).
+The variable becomes part of the environment for subsequent commands, so you can reference it in later `Given I run` and `When I run` shell commands. Smoko also expands captured variables in **Then/And file and directory path arguments** (e.g. `Then file "$OUTDIR/result.json" exists`). File content blocks are literal; Smoko does not expand `$VAR` inside them.
 
 ### When Steps (Action)
 
