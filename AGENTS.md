@@ -51,6 +51,7 @@ make test            # unit tests in Docker
 **Assertions** (`src/internal/assertions/`)
 - Evaluates Then/And steps against captured WhenResult and container filesystem
 - Regex pattern matching via Go's `regexp` (RE2 dialect); patterns cached in `sync.Map`
+- Assertion step regexes are anchored so unsupported trailing text is rejected as an unknown assertion
 - `EvaluateAll(ctx, steps, wr, dc, containerID)` is the preferred API — batches all filesystem checks into one docker exec before evaluating
 - `Evaluate(ctx, step, wr, dc, containerID)` handles a single step (used as fallback)
 - Supports: exit codes, output contains/matches/equals/empty, file/directory existence, file content, JSON path assertions

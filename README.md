@@ -259,6 +259,7 @@ File and directory assertion paths use the same relative path rule: relative pat
 
 `equals` trims leading/trailing whitespace before comparing (both sides), so trailing newlines are ignored.
 JSON `equals` compares parsed JSON values, not strings. Use JSON literals such as `"Alice"`, `3`, `true`, `null`, or block JSON for arrays and objects.
+Assertion steps must match one of the supported forms exactly; extra trailing words are rejected as unknown assertions.
 
 ### Background (Optional)
 

@@ -332,6 +332,46 @@ func TestUnknownAssertion(t *testing.T) {
 	assert.Contains(t, r.Message, "unknown Then assertion")
 }
 
+func TestOutputContainsRejectsTrailingText(t *testing.T) {
+	wr := newWhenResult("hello world", "", 0)
+	step := parser.Step{Text: `output contains "hello" eventually`}
+
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
+
+	assert.False(t, r.Pass)
+	assert.Contains(t, r.Message, "unknown Then assertion")
+}
+
+func TestOutputMatchesRejectsTrailingText(t *testing.T) {
+	wr := newWhenResult("version 1.2.3", "", 0)
+	step := parser.Step{Text: `output matches pattern "version" eventually`}
+
+	r := assertions.Evaluate(context.Background(), step, wr, nil, "", nil)
+
+	assert.False(t, r.Pass)
+	assert.Contains(t, r.Message, "unknown Then assertion")
+}
+
+func TestDirectoryExistsRejectsTrailingText(t *testing.T) {
+	fd := &fakeDocker{dirExistsResult: true}
+	step := parser.Step{Text: `directory "out" exists eventually`}
+
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", nil)
+
+	assert.False(t, r.Pass)
+	assert.Contains(t, r.Message, "unknown Then assertion")
+}
+
+func TestFileContainsRejectsTrailingText(t *testing.T) {
+	fd := &fakeDocker{readFileContent: "hello world"}
+	step := parser.Step{Text: `file "out.txt" contains "hello" eventually`}
+
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", nil)
+
+	assert.False(t, r.Pass)
+	assert.Contains(t, r.Message, "unknown Then assertion")
+}
+
 func TestOutputContainsEscapedQuote(t *testing.T) {
 	wr := newWhenResult(`"name": "value"`, "", 0)
 	step := parser.Step{Text: `output contains "\"name\": \"value\""`}

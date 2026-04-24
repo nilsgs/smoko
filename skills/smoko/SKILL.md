@@ -248,6 +248,7 @@ Rules:
 - Use JSON literals inline for scalars and compact values.
 - Use block JSON after `equals:` for arrays or objects.
 - `equals` requires the JSONPath to resolve to exactly one value.
+- Assertion steps must match a supported form exactly; extra trailing words are rejected as unknown assertions.
 
 ### File existence
 

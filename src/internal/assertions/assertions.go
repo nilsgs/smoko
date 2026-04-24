@@ -591,6 +591,7 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 	}
 	return fail("unknown Then assertion: %q", text)
 }
+
 var knownThenPatterns = []string{
 	`exit code is 0`,
 	`exit code is not 0`,
@@ -768,8 +769,8 @@ var (
 	reExitCodeIs    = regexp.MustCompile(`^exit code is (\d+)$`)
 	reExitCodeIsNot = regexp.MustCompile(`^exit code is not (\d+)$`)
 
-	reOutputContains = regexp.MustCompile(`^(?:the )?(?:output|stdout|stderr)(?: should not| does not| should)? contains? "((?:[^"\\]|\\.)*)"`)
-	reOutputMatches  = regexp.MustCompile(`^(?:output|stdout|stderr)(?: does not)? match(?:es)? pattern "((?:[^"\\]|\\.)*)"`)
+	reOutputContains = regexp.MustCompile(`^(?:the )?(?:output|stdout|stderr)(?: should not| does not| should)? contains? "((?:[^"\\]|\\.)*)"$`)
+	reOutputMatches  = regexp.MustCompile(`^(?:output|stdout|stderr)(?: does not)? match(?:es)? pattern "((?:[^"\\]|\\.)*)"$`)
 	reOutputEquals   = regexp.MustCompile(`^(?:output|stdout|stderr)(?: does not)? equals? "((?:[^"\\]|\\.)*)"$`)
 	reOutputEmpty    = regexp.MustCompile(`^(?:output|stdout|stderr) is (not )?empty$`)
 
@@ -778,10 +779,10 @@ var (
 	reOutputJSONEqualsInline = regexp.MustCompile(`^(output|stdout|stderr) as JSON at path "((?:[^"\\]|\\.)*)" equals (.+)$`)
 
 	reFileExists = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"(?:(?: does not)? exist[s]?)$`)
-	reDirExists  = regexp.MustCompile(`^(?:the )?directory "((?:[^"\\]|\\.)*)"(?:(?: does not)? exist[s]?)`)
+	reDirExists  = regexp.MustCompile(`^(?:the )?directory "((?:[^"\\]|\\.)*)"(?:(?: does not)? exist[s]?)$`)
 
 	reFileContainsBlock = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"(?: does not)? contain(?:s)?:$`)
-	reFileContains      = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"(?: does not)? contain(?:s)? "((?:[^"\\]|\\.)*)"`)
+	reFileContains      = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"(?: does not)? contain(?:s)? "((?:[^"\\]|\\.)*)"$`)
 	reFileMatches       = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"(?: does not)? match(?:es)? pattern "((?:[^"\\]|\\.)*)"$`)
 	reFileEquals        = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)"(?: does not)? equals? "((?:[^"\\]|\\.)*)"$`)
 	reFileEmpty         = regexp.MustCompile(`^file "((?:[^"\\]|\\.)*)" is (not )?empty$`)
