@@ -136,6 +136,9 @@ func runTests(path, imageFlag string, timeoutFlag int, timeoutFlagSet bool, verb
 		}
 		parsed = append(parsed, parsedFile{name: f, features: feats})
 	}
+	if err := validateParsedFiles(parsed); err != nil {
+		return emitFatal(rep, outputMode, suiteStart, err)
+	}
 
 	if list {
 		return listScenarios(parsed)
@@ -454,6 +457,71 @@ func collectFiles(path string) ([]string, error) {
 type parsedFile struct {
 	name     string
 	features []parser.Feature
+}
+
+func validateParsedFiles(files []parsedFile) error {
+	for _, pf := range files {
+		for _, feat := range pf.features {
+			if err := validateBackground(pf.name, feat); err != nil {
+				return err
+			}
+			for _, sc := range feat.Scenarios {
+				if err := validateScenario(pf.name, feat.Name, sc); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validateBackground(file string, feat parser.Feature) error {
+	for _, step := range feat.Background {
+		if step.ResolvedType != parser.StepGiven {
+			return fmt.Errorf("%s:%d: feature %q background step %q must be a Given step", file, step.Line, feat.Name, step.Text)
+		}
+	}
+	return nil
+}
+
+func validateScenario(file, featureName string, sc parser.Scenario) error {
+	whenCount := 0
+	thenCount := 0
+	phase := parser.StepGiven
+
+	for _, step := range sc.Steps {
+		switch step.ResolvedType {
+		case parser.StepGiven:
+			if phase != parser.StepGiven {
+				return fmt.Errorf("%s:%d: scenario %q has Given step %q after the When step", file, step.Line, sc.Name, step.Text)
+			}
+		case parser.StepWhen:
+			whenCount++
+			if whenCount > 1 {
+				return fmt.Errorf("%s:%d: scenario %q has multiple When steps", file, step.Line, sc.Name)
+			}
+			if phase == parser.StepThen {
+				return fmt.Errorf("%s:%d: scenario %q has When step %q after Then assertions", file, step.Line, sc.Name, step.Text)
+			}
+			phase = parser.StepWhen
+		case parser.StepThen:
+			if whenCount == 0 {
+				return fmt.Errorf("%s:%d: scenario %q has Then step %q before a When step", file, step.Line, sc.Name, step.Text)
+			}
+			thenCount++
+			phase = parser.StepThen
+		default:
+			return fmt.Errorf("%s:%d: scenario %q has unsupported step type for %q", file, step.Line, sc.Name, step.Text)
+		}
+	}
+
+	if whenCount == 0 {
+		return fmt.Errorf("%s:%d: feature %q scenario %q must contain exactly one When step", file, sc.Line, featureName, sc.Name)
+	}
+	if thenCount == 0 {
+		return fmt.Errorf("%s:%d: feature %q scenario %q must contain at least one Then assertion", file, sc.Line, featureName, sc.Name)
+	}
+	return nil
 }
 
 func listScenarios(files []parsedFile) error {

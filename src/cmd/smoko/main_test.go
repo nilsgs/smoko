@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/nskut/smoko/internal/config"
+	"github.com/nskut/smoko/internal/parser"
 	"github.com/nskut/smoko/internal/reporter"
 )
 
@@ -144,4 +146,156 @@ func TestRunBuildVerboseStreamsOutput(t *testing.T) {
 	// In verbose mode runBuild streams directly — it should not return an error on success.
 	err := runBuild(echoCmd("verbose-output"), t.TempDir(), reporter.OutputModeText, true)
 	require.NoError(t, err)
+}
+func TestValidateParsedFilesAcceptsStrictScenarioOrder(t *testing.T) {
+	files := []parsedFile{{
+		name: "test.smoko",
+		features: []parser.Feature{{
+			Name: "Feature",
+			Background: []parser.Step{
+				step(parser.StepGiven, "a file exists", 2),
+			},
+			Scenarios: []parser.Scenario{{
+				Name: "valid",
+				Line: 3,
+				Steps: []parser.Step{
+					step(parser.StepGiven, "setup", 4),
+					step(parser.StepWhen, "I run command", 5),
+					step(parser.StepThen, "exit code is 0", 6),
+				},
+			}},
+		}},
+	}}
+
+	require.NoError(t, validateParsedFiles(files))
+}
+
+func TestValidateParsedFilesRejectsBackgroundWhenStep(t *testing.T) {
+	files := []parsedFile{{
+		name: "test.smoko",
+		features: []parser.Feature{{
+			Name:       "Feature",
+			Background: []parser.Step{step(parser.StepWhen, "I run command", 2)},
+			Scenarios: []parser.Scenario{{
+				Name: "valid",
+				Line: 3,
+				Steps: []parser.Step{
+					step(parser.StepWhen, "I run command", 4),
+					step(parser.StepThen, "exit code is 0", 5),
+				},
+			}},
+		}},
+	}}
+
+	err := validateParsedFiles(files)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "background")
+	assert.Contains(t, err.Error(), "must be a Given")
+}
+
+func TestValidateParsedFilesRejectsMissingWhen(t *testing.T) {
+	sc := parser.Scenario{
+		Name: "missing when",
+		Line: 10,
+		Steps: []parser.Step{
+			step(parser.StepGiven, "setup", 11),
+		},
+	}
+
+	err := validateScenario("test.smoko", "Feature", sc)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exactly one When")
+}
+
+func TestValidateParsedFilesRejectsMissingThen(t *testing.T) {
+	sc := parser.Scenario{
+		Name:  "missing then",
+		Line:  10,
+		Steps: []parser.Step{step(parser.StepWhen, "I run command", 11)},
+	}
+
+	err := validateScenario("test.smoko", "Feature", sc)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at least one Then")
+}
+
+func TestValidateParsedFilesRejectsGivenAfterWhen(t *testing.T) {
+	sc := parser.Scenario{
+		Name: "given after when",
+		Line: 10,
+		Steps: []parser.Step{
+			step(parser.StepWhen, "I run command", 11),
+			step(parser.StepGiven, "late setup", 12),
+			step(parser.StepThen, "exit code is 0", 13),
+		},
+	}
+
+	err := validateScenario("test.smoko", "Feature", sc)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "after the When")
+}
+
+func TestValidateParsedFilesRejectsThenBeforeWhen(t *testing.T) {
+	sc := parser.Scenario{
+		Name: "then before when",
+		Line: 10,
+		Steps: []parser.Step{
+			step(parser.StepThen, "exit code is 0", 11),
+			step(parser.StepWhen, "I run command", 12),
+		},
+	}
+
+	err := validateScenario("test.smoko", "Feature", sc)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "before a When")
+}
+
+func TestValidateParsedFilesRejectsMultipleWhenSteps(t *testing.T) {
+	sc := parser.Scenario{
+		Name: "multiple when",
+		Line: 10,
+		Steps: []parser.Step{
+			step(parser.StepWhen, "I run first", 11),
+			step(parser.StepWhen, "I run second", 12),
+			step(parser.StepThen, "exit code is 0", 13),
+		},
+	}
+
+	err := validateScenario("test.smoko", "Feature", sc)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "multiple When")
+}
+
+func TestRunTestsListValidatesScenarioOrder(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "invalid.smoko")
+	err := os.WriteFile(specPath, []byte(`Feature: Invalid
+  Image: alpine:latest
+
+  Scenario: Given after When
+    When I run "true"
+    Given a file "late.txt" exists
+    Then exit code is 0
+`), 0644)
+	require.NoError(t, err)
+
+	err = runTests(specPath, "", config.DefaultTimeout, false, false, "", false, 1, true, true)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "after the When")
+}
+
+func step(kind parser.StepType, text string, line int) parser.Step {
+	return parser.Step{
+		Type:         kind,
+		ResolvedType: kind,
+		Text:         text,
+		Line:         line,
+	}
 }

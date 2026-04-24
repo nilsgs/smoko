@@ -10,11 +10,12 @@ Use this guide to write correct Smoko scenarios and stay within the DSL the tool
 ## Core model
 
 - Treat each `Scenario` as one isolated test run in a fresh Docker container.
-- Use `Background` for setup shared by every scenario in the feature.
+- Use `Background` for setup shared by every scenario in the feature; it may contain only `Given` steps.
 - Expect the working directory inside the container to be `/smoko-work`.
 - Execute `Given` steps in source order.
-- Use a single `When` step as the action under test.
+- Use exactly one `When` step as the action under test.
 - Use `Then` and inherited `And` or `But` steps for assertions. `And`/`But` inherit their type from the preceding keyword (`Given`, `When`, or `Then`).
+- Keep scenario steps in strict order: all `Given` setup first, then the single `When`, then one or more `Then` assertions.
 
 ## Output modes
 

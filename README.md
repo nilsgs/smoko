@@ -154,6 +154,8 @@ Scenario: Scenario description
   Then [assertions]
 ```
 
+Scenarios are validated strictly: all `Given` setup steps must appear before the single `When` action step, and all `Then` assertions must appear after it. Each scenario must contain exactly one `When` step and at least one `Then` assertion. `And` and `But` inherit the type of the preceding step for this validation.
+
 ### Given Steps (Setup)
 
 ```gherkin
@@ -270,6 +272,8 @@ Feature: With Background
     When I run "app --config config.json"
     Then exit code is 0
 ```
+
+`Background` may contain only `Given` setup steps. Use scenario-level `When` and `Then` steps for the action and assertions.
 
 ## Configuration
 

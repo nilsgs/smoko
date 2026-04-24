@@ -20,6 +20,7 @@ make test            # unit tests in Docker
 - Parser: Recursive-descent parser that produces an AST of Feature/Scenario/Step objects
 - Handles Gherkin-like syntax: Feature, Background, Scenario, Given/When/Then/And/But
 - Special handling: `And`/`But` inherit step type from preceding step; `#` inside indented blocks is treated as content (not comments)
+- CLI validation enforces strict scenario structure before `--list` or Docker execution: Background contains only Given steps; each scenario has Given setup, exactly one When, then one or more Then assertions
 
 **Docker** (`src/internal/docker/`)
 - Wraps Docker SDK (`github.com/docker/docker`)
@@ -104,7 +105,7 @@ Exit code: 0 (pass), 1 (fail), 2 (error)
 
 ### Key Files
 
-- `src/cmd/smoko/main.go`: CLI entry point (Cobra), orchestrates test discovery, parallel execution, container lifecycle, reporting; `--list` flag prints scenarios without running Docker; defaults to `specs/` path
+- `src/cmd/smoko/main.go`: CLI entry point (Cobra), orchestrates test discovery, strict scenario validation, parallel execution, container lifecycle, reporting; `--list` flag validates and prints scenarios without running Docker; defaults to `specs/` path
 - `src/internal/parser/types.go`: AST types (StepType, Step, Scenario, Feature)
 - `src/internal/parser/lexer.go`: Tokenization with stateful block detection
 - `src/internal/parser/parser.go`: Recursive-descent parser
