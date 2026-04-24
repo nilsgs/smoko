@@ -291,6 +291,30 @@ func TestRunTestsListValidatesScenarioOrder(t *testing.T) {
 	assert.Contains(t, err.Error(), "after the When")
 }
 
+func TestRunTestsListSkipsConfiguredBuild(t *testing.T) {
+	dir := t.TempDir()
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	defer func() {
+		require.NoError(t, os.Chdir(cwd))
+	}()
+
+	err = os.WriteFile(filepath.Join(dir, ".smokorc"), []byte(`build = "exit 99"`), 0644)
+	require.NoError(t, err)
+	specPath := filepath.Join(dir, "valid.smoko")
+	err = os.WriteFile(specPath, []byte(`Feature: Valid
+  Scenario: Lists without build
+    When I run "true"
+    Then exit code is 0
+`), 0644)
+	require.NoError(t, err)
+
+	err = runTests(specPath, "", config.DefaultTimeout, false, false, "", false, 1, false, true)
+
+	require.NoError(t, err)
+}
+
 func step(kind parser.StepType, text string, line int) parser.Step {
 	return parser.Step{
 		Type:         kind,

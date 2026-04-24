@@ -69,7 +69,7 @@ smoko run specs/
 smoko run test.smoko --image myimage:latest --verbose --fail-fast
 smoko run specs/ --output json
 
-# List scenarios without running
+# List scenarios without building or running
 smoko run --list
 smoko run specs/ --list
 ```
@@ -285,7 +285,7 @@ timeout = 1                 # Seconds per setup/action command
 build   = "docker build -f Dockerfile.test -t myimage:latest ."  # Optional: build image before running tests
 ```
 
-When `build` is set, smoko runs the command (from the `.smokorc` directory) before pulling images or running any scenarios. Build output streams to the terminal in real-time. Use `--no-build` to skip the build step when the image is already current.
+When `build` is set, smoko runs the command (from the `.smokorc` directory) before pulling images or running any scenarios. Build output streams to the terminal in real-time. Use `--no-build` to skip the build step when the image is already current. `--list` validates and lists scenarios without running the build command.
 
 Or use CLI flags to override:
 
@@ -308,7 +308,7 @@ Defaults are tuned for faster feedback: `--parallel` uses auto mode by default a
 | `--fail-fast` | false | Stop after the first failed scenario |
 | `--parallel` | 0 | Number of scenarios to run concurrently (0 = auto) |
 | `--no-build` | false | Skip the build step defined in .smokorc |
-| `--list` | false | List scenarios without running them |
+| `--list` | false | Validate and list scenarios without building or running them |
 
 ## Report Output
 

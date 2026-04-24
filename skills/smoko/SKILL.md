@@ -443,7 +443,7 @@ smoko run test.smoko --image alpine:latest
 smoko run test.smoko --verbose
 smoko run specs/ --output json   # preferred for agents and tooling
 smoko run test.smoko --fail-fast
-smoko run specs/ --list    # list scenarios without running
+smoko run specs/ --list    # validate and list scenarios without building or running
 smoko run specs/ --no-build   # skip build step even if .smokorc has build = "..."
 ```
 
@@ -457,4 +457,4 @@ timeout = 5
 build   = "docker build -f Dockerfile.test -t myimage:latest ."
 ```
 
-When `build` is set, smoko runs the command before pulling or running any scenarios. Build output streams to the terminal. Use `--no-build` to skip when the image is already current.
+When `build` is set, smoko runs the command before pulling or running any scenarios. Build output streams to the terminal. Use `--no-build` to skip when the image is already current. `--list` validates and lists scenarios without running the build command.

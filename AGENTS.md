@@ -67,7 +67,7 @@ make test            # unit tests in Docker
 - Loads `.smokorc` (TOML format)
 - Fields: `image` (string), `timeout` (int seconds), `build` (string — command to build Docker image)
 - Image resolution precedence: `--image` flag > `Image:` in .smoko > `.smokorc` default
-- When `build` is set and `--no-build` is not passed, the build command runs before image pull
+- When `build` is set and `--no-build` is not passed, the build command runs before image pull; `--list` skips the build command
 
 **Hints** (`src/internal/hints/`)
 - `Suggest(text, patterns []string) string` — Levenshtein distance on normalised step text
@@ -80,7 +80,7 @@ make test            # unit tests in Docker
     ↓
 Parse → []Feature{[]Scenario{[]Step}}
     ↓
-Run build command (if .smokorc has build = "..." and --no-build not set)
+Run build command (if .smokorc has build = "..." and --no-build not set, except for --list)
     ↓
 Pull unique images (cached via sync.Map)
     ↓
@@ -105,7 +105,7 @@ Exit code: 0 (pass), 1 (fail), 2 (error)
 
 ### Key Files
 
-- `src/cmd/smoko/main.go`: CLI entry point (Cobra), orchestrates test discovery, strict scenario validation, parallel execution, container lifecycle, reporting; `--list` flag validates and prints scenarios without running Docker; defaults to `specs/` path
+- `src/cmd/smoko/main.go`: CLI entry point (Cobra), orchestrates test discovery, strict scenario validation, parallel execution, container lifecycle, reporting; `--list` flag validates and prints scenarios without running the build command or Docker; defaults to `specs/` path
 - `src/internal/parser/types.go`: AST types (StepType, Step, Scenario, Feature)
 - `src/internal/parser/lexer.go`: Tokenization with stateful block detection
 - `src/internal/parser/parser.go`: Recursive-descent parser

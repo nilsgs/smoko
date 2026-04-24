@@ -144,6 +144,12 @@ func runTests(path, imageFlag string, timeoutFlag int, timeoutFlagSet bool, verb
 		return listScenarios(parsed)
 	}
 
+	if cfg.Build != "" && !noBuild {
+		if err := runBuild(cfg.Build, wd, outputMode); err != nil {
+			return emitFatal(rep, outputMode, suiteStart, err)
+		}
+	}
+
 	dc, err := docker.New()
 	if err != nil {
 		return emitFatal(rep, outputMode, suiteStart, fmt.Errorf("docker: %w", err))
