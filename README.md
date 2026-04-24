@@ -291,7 +291,7 @@ smoko run specs/ --output json
 smoko run specs/ --no-build   # skip image build
 ```
 
-Defaults are tuned for faster feedback: `--parallel` uses auto mode by default and `--timeout` defaults to `1` second unless `.smokorc` or an explicit flag overrides it.
+Defaults are tuned for faster feedback: `--parallel` uses auto mode by default and `--timeout` defaults to `1` second unless `.smokorc` or an explicit flag overrides it. If a setup or action command exceeds the timeout, the scenario errors and its container is removed during cleanup.
 
 ## CLI Flags
 

@@ -23,7 +23,7 @@ make test            # unit tests in Docker
 
 **Docker** (`src/internal/docker/`)
 - Wraps Docker SDK (`github.com/docker/docker`)
-- Container lifecycle: create (with env vars), exec (with timeout), write files (via tar), read files
+- Container lifecycle: create (with env vars), exec (with timeout errors), write files (via tar), read files
 - Each scenario runs in a fresh container for isolation
 - Working directory: `/smoko-work` inside container
 - `WriteFiles(ctx, containerID, []FileEntry)` uploads multiple files in a single tar archive
@@ -150,7 +150,7 @@ Exit code: 0 (pass), 1 (fail), 2 (error)
 - Then file/directory assertion paths resolve relative paths under `/smoko-work`; absolute assertion paths are allowed for read/check use cases, but `..` path segments are rejected
 - Commands are wrapped: `source .smoko_env; <user-command>` to inject env vars
 - File writes use tar archives (no host mounts for isolation)
-- Exit codes are captured; timeouts default to 1s (configurable)
+- Exit codes are captured; timed-out execs return an error; timeouts default to 1s (configurable)
 
 ## Testing Guidelines
 
@@ -182,6 +182,7 @@ Exit code: 0 (pass), 1 (fail), 2 (error)
 **Issue:** Container times out
 - Increase `--timeout` or set `timeout` in `.smokorc`
 - Check if image is pulling (use `--verbose`)
+- Timed-out setup/action commands fail the scenario; deferred container cleanup removes the container
 
 **Issue:** Environment variables not visible in When step
 - Verify syntax: `Given environment variable "NAME" is set to "value"`

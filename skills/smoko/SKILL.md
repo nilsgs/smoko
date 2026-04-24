@@ -422,7 +422,7 @@ Scenario: CLI respects environment variables
 - If a JSON assertion fails, check whether the source is valid JSON, whether the JSONPath is valid, and whether `equals` matched exactly one node.
 - If shared setup is repeated across scenarios, move it into `Background`.
 - If the setup is imperative shell work, prefer `Given I run "..."` over abusing `When`.
-- If a scenario times out, remember the default timeout is `1` second and increase `--timeout` or `.smokorc` only for the slow path.
+- If a scenario times out, Smoko reports the timed-out setup/action command as an error and removes the scenario container during cleanup; remember the default timeout is `1` second and increase `--timeout` or `.smokorc` only for the slow path.
 
 ## Performance
 
@@ -446,7 +446,7 @@ smoko run specs/ --list    # list scenarios without running
 smoko run specs/ --no-build   # skip build step even if .smokorc has build = "..."
 ```
 
-`timeout` in `.smokorc` or `--timeout` applies to setup and action commands. The built-in default is `1` second.
+`timeout` in `.smokorc` or `--timeout` applies to setup and action commands. The built-in default is `1` second. A command that exceeds the timeout fails the scenario with a timeout error.
 
 ## .smokorc
 

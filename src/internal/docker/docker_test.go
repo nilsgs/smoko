@@ -3,6 +3,7 @@ package docker
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -106,4 +107,12 @@ func TestAssertionPathRejectsTraversal(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "..")
+}
+
+func TestExecTimeoutErrorIncludesDuration(t *testing.T) {
+	err := execTimeoutError(1500 * time.Millisecond)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "timed out")
+	assert.Contains(t, err.Error(), "1.5s")
 }

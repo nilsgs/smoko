@@ -113,8 +113,14 @@ func (c *Client) ExecCommand(ctx context.Context, containerID, workdir, command 
 	}
 
 	var outBuf, errBuf bytes.Buffer
-	if _, err := stdcopy.StdCopy(&outBuf, &errBuf, attach.Reader); err != nil && execCtx.Err() == nil {
+	if _, err := stdcopy.StdCopy(&outBuf, &errBuf, attach.Reader); err != nil {
+		if execCtx.Err() != nil {
+			return outBuf.String(), errBuf.String(), -1, execTimeoutError(timeout)
+		}
 		return "", "", -1, fmt.Errorf("docker: read exec output: %w", err)
+	}
+	if execCtx.Err() != nil {
+		return outBuf.String(), errBuf.String(), -1, execTimeoutError(timeout)
 	}
 
 	inspect, err := c.cli.ContainerExecInspect(ctx, execResp.ID)
@@ -123,6 +129,10 @@ func (c *Client) ExecCommand(ctx context.Context, containerID, workdir, command 
 	}
 
 	return outBuf.String(), errBuf.String(), inspect.ExitCode, nil
+}
+
+func execTimeoutError(timeout time.Duration) error {
+	return fmt.Errorf("docker: exec timed out after %s", timeout)
 }
 
 // FileEntry represents a file to write into a container.
