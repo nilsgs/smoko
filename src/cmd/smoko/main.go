@@ -194,8 +194,8 @@ func runTests(path, imageFlag string, timeoutFlag int, timeoutFlagSet bool, verb
 			continue
 		}
 		seenImages[j.img] = true
-		if err := dc.PullIfMissing(ctx, j.img); err != nil {
-			return emitFatal(rep, outputMode, suiteStart, fmt.Errorf("docker pull %s: %w", j.img, err))
+		if err := ensureImageAvailable(ctx, dc, j.img); err != nil {
+			return emitFatal(rep, outputMode, suiteStart, err)
 		}
 	}
 
@@ -459,6 +459,15 @@ func runBuild(command, dir string, outputMode reporter.OutputMode, verbose bool)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("build failed: %w", err)
 	}
+	return nil
+}
+
+func ensureImageAvailable(ctx context.Context, dc *docker.Client, imageName string) error {
+	fmt.Fprintf(os.Stderr, "Ensuring Docker image: %s\n", imageName)
+	if err := dc.PullIfMissing(ctx, imageName); err != nil {
+		return fmt.Errorf("docker pull %s: %w", imageName, err)
+	}
+	fmt.Fprintf(os.Stderr, "Docker image ready: %s\n", imageName)
 	return nil
 }
 

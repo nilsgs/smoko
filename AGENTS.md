@@ -62,6 +62,7 @@ make test            # unit tests in Docker
 - Per-scenario: `✓ feature / scenario` or `✗ feature / scenario`
 - Failure details: assertion failures, actual vs expected
 - Summary line: `N passed, M failed (total)`
+- Build and Docker image readiness status is written to stderr so JSON stdout remains parseable
 - ANSI colors detected (NO_COLOR env var, non-TTY detection)
 - Thread-safe: `Add()` is guarded by a `sync.Mutex` for use with `--parallel`
 
@@ -84,7 +85,7 @@ Parse → []Feature{[]Scenario{[]Step}}
     ↓
 Run build command (if .smokorc has build = "..." and --no-build not set, except for --list)
     ↓
-Pull unique images (cached via sync.Map)
+Report and pull/check unique images (cached via sync.Map)
     ↓
 For each Scenario (optionally parallel via --parallel N):
   1. Collect env vars from Given steps

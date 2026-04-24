@@ -23,6 +23,7 @@ Use this guide to write correct Smoko scenarios and stay within the DSL the tool
 - Use `smoko run ... --output json` when another tool or agent will parse the result.
 - Default text mode includes runtime in live scenario status lines, per-feature totals, and the suite summary.
 - JSON mode emits one structured document to stdout with suite, feature, and scenario durations plus assertion metadata.
+- Build and Docker image readiness status is written to stderr, keeping JSON stdout parseable while showing progress for slow builds or pulls.
 - Prefer JSON mode for agent retries, diagnostics extraction, or any workflow that needs stable machine-readable fields.
 
 ## Supported structure
@@ -460,4 +461,4 @@ timeout = 5
 build   = "docker build -f Dockerfile.test -t myimage:latest ."
 ```
 
-When `build` is set, smoko runs the command before pulling or running any scenarios. Build output streams to the terminal. Use `--no-build` to skip when the image is already current. `--list` validates and lists scenarios without running the build command.
+When `build` is set, smoko runs the command before pulling or running any scenarios. Build output streams to the terminal, and each unique Docker image is reported as it is checked or pulled. Use `--no-build` to skip when the image is already current. `--list` validates and lists scenarios without running the build command.
