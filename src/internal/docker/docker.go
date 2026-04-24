@@ -68,8 +68,8 @@ func (c *Client) CreateContainer(ctx context.Context, imageName string, env []st
 		Env:        env,
 		WorkingDir: workDir,
 		// Keep the container alive so we can exec into it
-		Cmd:        []string{"sh", "-c", "mkdir -p " + workDir + " && tail -f /dev/null"},
-		Tty:        false,
+		Cmd: []string{"sh", "-c", "mkdir -p " + workDir + " && tail -f /dev/null"},
+		Tty: false,
 	}, nil, nil, nil, "")
 	if err != nil {
 		return "", fmt.Errorf("docker: create container: %w", err)
@@ -265,9 +265,8 @@ func (c *Client) BatchFSCheck(ctx context.Context, containerID string, checks []
 		return c.singleFSCheck(ctx, containerID, checks[0])
 	}
 
-	// Build a shell script that outputs structured results.
-	// Protocol: for each check, output a marker line then the result.
-	// Markers: __SMOKO_CHK_<index>_START__ and __SMOKO_CHK_<index>_END__
+	// Build a shell script that outputs structured results. File reads use a
+	// byte count so marker-looking file content cannot corrupt parsing.
 	var sb strings.Builder
 	for i, chk := range checks {
 		absPath := absWorkPath(chk.Path)
@@ -276,14 +275,15 @@ func (c *Client) BatchFSCheck(ctx context.Context, containerID string, checks []
 
 		switch chk.Kind {
 		case FSCheckFileExists:
-			fmt.Fprintf(&sb, "echo %s; test -f %s && echo YES || echo NO; echo %s\n",
-				startMarker, ShellQuote(absPath), endMarker)
+			fmt.Fprintf(&sb, "printf '%%s\\n' %s; test -f %s && printf 'YES\\n' || printf 'NO\\n'; printf '%%s\\n' %s\n",
+				ShellQuote(startMarker), ShellQuote(absPath), ShellQuote(endMarker))
 		case FSCheckDirExists:
-			fmt.Fprintf(&sb, "echo %s; test -d %s && echo YES || echo NO; echo %s\n",
-				startMarker, ShellQuote(absPath), endMarker)
+			fmt.Fprintf(&sb, "printf '%%s\\n' %s; test -d %s && printf 'YES\\n' || printf 'NO\\n'; printf '%%s\\n' %s\n",
+				ShellQuote(startMarker), ShellQuote(absPath), ShellQuote(endMarker))
 		case FSCheckReadFile:
-			fmt.Fprintf(&sb, "echo %s; cat %s 2>/dev/null && echo '' && echo __SMOKO_CAT_OK__ || echo __SMOKO_CAT_FAIL__; echo %s\n",
-				startMarker, ShellQuote(absPath), endMarker)
+			quotedPath := ShellQuote(absPath)
+			fmt.Fprintf(&sb, "printf '%%s\\n' %s; if bytes=$(wc -c < %s 2>/dev/null); then bytes=$(printf '%%s' \"$bytes\" | tr -d '[:space:]'); printf 'OK %%s\\n' \"$bytes\"; cat %s 2>/dev/null; printf '\\n%%s\\n' %s; else printf 'ERR\\n'; printf '%%s\\n' %s; fi\n",
+				ShellQuote(startMarker), quotedPath, quotedPath, ShellQuote(endMarker), ShellQuote(endMarker))
 		}
 	}
 
@@ -292,37 +292,120 @@ func (c *Client) BatchFSCheck(ctx context.Context, containerID string, checks []
 		return nil, fmt.Errorf("docker: batch fs check: %w", err)
 	}
 
-	// Parse results
+	return parseBatchFSCheckOutput(stdout, checks), nil
+}
+
+func parseBatchFSCheckOutput(stdout string, checks []FSCheck) []FSResult {
 	results := make([]FSResult, len(checks))
+	pos := 0
+
 	for i, chk := range checks {
 		startMarker := fmt.Sprintf("__SMOKO_CHK_%d_START__", i)
 		endMarker := fmt.Sprintf("__SMOKO_CHK_%d_END__", i)
 
-		startIdx := strings.Index(stdout, startMarker)
-		endIdx := strings.Index(stdout, endMarker)
-		if startIdx < 0 || endIdx < 0 {
+		line, next, ok := readProtocolLine(stdout, pos)
+		if !ok || line != startMarker {
 			results[i] = FSResult{Err: fmt.Errorf("missing marker for check %d", i)}
 			continue
 		}
-
-		body := stdout[startIdx+len(startMarker) : endIdx]
-		body = strings.TrimSpace(body)
+		pos = next
 
 		switch chk.Kind {
 		case FSCheckFileExists, FSCheckDirExists:
-			results[i] = FSResult{Exists: body == "YES"}
-		case FSCheckReadFile:
-			if strings.HasSuffix(body, "__SMOKO_CAT_FAIL__") {
-				results[i] = FSResult{Err: fmt.Errorf("docker: file %s not found", chk.Path)}
-			} else {
-				content := strings.TrimSuffix(body, "__SMOKO_CAT_OK__")
-				content = strings.TrimRight(content, "\n")
-				results[i] = FSResult{Exists: true, Content: content}
+			resultLine, next, ok := readProtocolLine(stdout, pos)
+			if !ok {
+				results[i] = FSResult{Err: fmt.Errorf("missing result for check %d", i)}
+				continue
 			}
+			pos = next
+			if err := consumeEndMarker(stdout, &pos, endMarker, i); err != nil {
+				results[i] = FSResult{Err: err}
+				continue
+			}
+			switch resultLine {
+			case "YES":
+				results[i] = FSResult{Exists: true}
+			case "NO":
+				results[i] = FSResult{Exists: false}
+			default:
+				results[i] = FSResult{Err: fmt.Errorf("invalid result %q for check %d", resultLine, i)}
+			}
+		case FSCheckReadFile:
+			header, next, ok := readProtocolLine(stdout, pos)
+			if !ok {
+				results[i] = FSResult{Err: fmt.Errorf("missing read header for check %d", i)}
+				continue
+			}
+			pos = next
+			if header == "ERR" {
+				if err := consumeEndMarker(stdout, &pos, endMarker, i); err != nil {
+					results[i] = FSResult{Err: err}
+					continue
+				}
+				results[i] = FSResult{Err: fmt.Errorf("docker: file %s not found", chk.Path)}
+				continue
+			}
+			if !strings.HasPrefix(header, "OK ") {
+				results[i] = FSResult{Err: fmt.Errorf("invalid read header %q for check %d", header, i)}
+				continue
+			}
+			size, err := parseByteCount(strings.TrimPrefix(header, "OK "))
+			if err != nil {
+				results[i] = FSResult{Err: fmt.Errorf("invalid byte count for check %d: %w", i, err)}
+				continue
+			}
+			if size < 0 || pos+size > len(stdout) {
+				results[i] = FSResult{Err: fmt.Errorf("truncated file content for check %d", i)}
+				continue
+			}
+			content := stdout[pos : pos+size]
+			pos += size
+			if pos >= len(stdout) || stdout[pos] != '\n' {
+				results[i] = FSResult{Err: fmt.Errorf("missing content delimiter for check %d", i)}
+				continue
+			}
+			pos++
+			if err := consumeEndMarker(stdout, &pos, endMarker, i); err != nil {
+				results[i] = FSResult{Err: err}
+				continue
+			}
+			results[i] = FSResult{Exists: true, Content: content}
+		default:
+			results[i] = FSResult{Err: fmt.Errorf("unknown check kind")}
 		}
 	}
 
-	return results, nil
+	return results
+}
+
+func readProtocolLine(s string, pos int) (line string, next int, ok bool) {
+	if pos > len(s) {
+		return "", pos, false
+	}
+	idx := strings.IndexByte(s[pos:], '\n')
+	if idx < 0 {
+		return "", pos, false
+	}
+	line = s[pos : pos+idx]
+	line = strings.TrimSuffix(line, "\r")
+	return line, pos + idx + 1, true
+}
+
+func consumeEndMarker(stdout string, pos *int, endMarker string, checkIndex int) error {
+	line, next, ok := readProtocolLine(stdout, *pos)
+	if !ok || line != endMarker {
+		return fmt.Errorf("missing end marker for check %d", checkIndex)
+	}
+	*pos = next
+	return nil
+}
+
+func parseByteCount(raw string) (int, error) {
+	var size int
+	if _, err := fmt.Sscan(raw, &size); err != nil {
+		return 0, err
+	}
+	return size, nil
 }
 
 func (c *Client) singleFSCheck(ctx context.Context, containerID string, chk FSCheck) ([]FSResult, error) {
