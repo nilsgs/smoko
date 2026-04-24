@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	pathpkg "path"
 	"strings"
 	"sync"
 	"time"
@@ -126,7 +127,7 @@ func (c *Client) ExecCommand(ctx context.Context, containerID, workdir, command 
 
 // FileEntry represents a file to write into a container.
 type FileEntry struct {
-	Path    string // absolute path inside the container
+	Path    string // relative to /smoko-work, or absolute under /smoko-work
 	Content string
 }
 
@@ -146,13 +147,17 @@ func (c *Client) WriteFiles(ctx context.Context, containerID string, files []Fil
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 
-	// Track which directories we've already added to the tar
 	dirs := make(map[string]bool)
 	for _, f := range files {
-		// Ensure all parent directories are represented in the tar
-		parts := strings.Split(strings.TrimPrefix(f.Path, "/"), "/")
+		absPath, err := WorkPath(f.Path)
+		if err != nil {
+			return fmt.Errorf("invalid file path %q: %w", f.Path, err)
+		}
+		tarPath := strings.TrimPrefix(absPath, "/")
+		parts := strings.Split(tarPath, "/")
+
 		for i := 1; i < len(parts); i++ {
-			dir := "/" + strings.Join(parts[:i], "/") + "/"
+			dir := strings.Join(parts[:i], "/") + "/"
 			if !dirs[dir] {
 				dirs[dir] = true
 				_ = tw.WriteHeader(&tar.Header{
@@ -165,7 +170,7 @@ func (c *Client) WriteFiles(ctx context.Context, containerID string, files []Fil
 
 		body := []byte(f.Content)
 		if err := tw.WriteHeader(&tar.Header{
-			Name: f.Path,
+			Name: tarPath,
 			Mode: 0644,
 			Size: int64(len(body)),
 		}); err != nil {
@@ -182,7 +187,11 @@ func (c *Client) WriteFiles(ctx context.Context, containerID string, files []Fil
 
 // MakeDir creates a directory (and parents) inside the container.
 func (c *Client) MakeDir(ctx context.Context, containerID, path string) error {
-	_, _, code, err := c.ExecCommand(ctx, containerID, "", "mkdir -p "+ShellQuote(workDir+"/"+strings.TrimPrefix(path, "/")), "", 10*time.Second)
+	absPath, err := WorkPath(path)
+	if err != nil {
+		return fmt.Errorf("invalid directory path %q: %w", path, err)
+	}
+	_, _, code, err := c.ExecCommand(ctx, containerID, "", "mkdir -p "+ShellQuote(absPath), "", 10*time.Second)
 	if err != nil {
 		return fmt.Errorf("docker: mkdir %s: %w", path, err)
 	}
@@ -194,7 +203,10 @@ func (c *Client) MakeDir(ctx context.Context, containerID, path string) error {
 
 // ReadFile reads the contents of a file inside the container.
 func (c *Client) ReadFile(ctx context.Context, containerID, path string) (string, error) {
-	absPath := absWorkPath(path)
+	absPath, err := AssertionPath(path)
+	if err != nil {
+		return "", fmt.Errorf("invalid file path %q: %w", path, err)
+	}
 	stdout, _, code, err := c.ExecCommand(ctx, containerID, "", "cat "+ShellQuote(absPath), "", 10*time.Second)
 	if err != nil {
 		return "", fmt.Errorf("docker: read file %s: %w", path, err)
@@ -207,7 +219,10 @@ func (c *Client) ReadFile(ctx context.Context, containerID, path string) (string
 
 // FileExists checks if a file exists inside the container.
 func (c *Client) FileExists(ctx context.Context, containerID, path string) (bool, error) {
-	absPath := absWorkPath(path)
+	absPath, err := AssertionPath(path)
+	if err != nil {
+		return false, fmt.Errorf("invalid file path %q: %w", path, err)
+	}
 	_, _, code, err := c.ExecCommand(ctx, containerID, "", "test -f "+ShellQuote(absPath), "", 10*time.Second)
 	if err != nil {
 		return false, err
@@ -217,7 +232,10 @@ func (c *Client) FileExists(ctx context.Context, containerID, path string) (bool
 
 // DirExists checks if a directory exists inside the container.
 func (c *Client) DirExists(ctx context.Context, containerID, path string) (bool, error) {
-	absPath := absWorkPath(path)
+	absPath, err := AssertionPath(path)
+	if err != nil {
+		return false, fmt.Errorf("invalid directory path %q: %w", path, err)
+	}
 	_, _, code, err := c.ExecCommand(ctx, containerID, "", "test -d "+ShellQuote(absPath), "", 10*time.Second)
 	if err != nil {
 		return false, err
@@ -269,7 +287,10 @@ func (c *Client) BatchFSCheck(ctx context.Context, containerID string, checks []
 	// byte count so marker-looking file content cannot corrupt parsing.
 	var sb strings.Builder
 	for i, chk := range checks {
-		absPath := absWorkPath(chk.Path)
+		absPath, err := AssertionPath(chk.Path)
+		if err != nil {
+			return nil, fmt.Errorf("invalid filesystem check path %q: %w", chk.Path, err)
+		}
 		startMarker := fmt.Sprintf("__SMOKO_CHK_%d_START__", i)
 		endMarker := fmt.Sprintf("__SMOKO_CHK_%d_END__", i)
 
@@ -430,11 +451,52 @@ func (c *Client) singleFSCheck(ctx context.Context, containerID string, chk FSCh
 // WorkDir returns the working directory used inside containers.
 func WorkDir() string { return workDir }
 
-func absWorkPath(p string) string {
-	if strings.HasPrefix(p, "/") {
-		return p
+// WorkPath resolves a Smoko-managed path and requires it to stay under
+// /smoko-work. Use this for setup writes and working-directory changes.
+func WorkPath(p string) (string, error) {
+	return resolveContainerPath(p, true)
+}
+
+// AssertionPath resolves a path for read/check assertions. Relative paths are
+// rooted under /smoko-work, while absolute paths may point elsewhere.
+func AssertionPath(p string) (string, error) {
+	return resolveContainerPath(p, false)
+}
+
+func resolveContainerPath(p string, confined bool) (string, error) {
+	if p == "" {
+		return "", fmt.Errorf("path is empty")
 	}
-	return workDir + "/" + p
+	if strings.ContainsRune(p, '\x00') {
+		return "", fmt.Errorf("path contains NUL byte")
+	}
+	if hasParentPathSegment(p) {
+		return "", fmt.Errorf("path must not contain '..'")
+	}
+
+	var resolved string
+	if pathpkg.IsAbs(p) {
+		resolved = pathpkg.Clean(p)
+	} else {
+		resolved = pathpkg.Clean(workDir + "/" + p)
+	}
+	if confined && !isUnderWorkDir(resolved) {
+		return "", fmt.Errorf("path must stay under %s", workDir)
+	}
+	return resolved, nil
+}
+
+func hasParentPathSegment(p string) bool {
+	for _, part := range strings.Split(p, "/") {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+func isUnderWorkDir(p string) bool {
+	return p == workDir || strings.HasPrefix(p, workDir+"/")
 }
 
 // ShellQuote wraps s in single quotes, escaping any existing single quotes.

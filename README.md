@@ -169,7 +169,9 @@ Given environment variable "VAR" is set to "value"
 
 `Given I run "..."` executes inside the current working directory (default `/smoko-work`, or whatever `Given the working directory is` set), sources `.smoko_env` if present, and fails the scenario immediately on a non-zero exit code.
 
-`Given the working directory is "path"` sets the working directory for all subsequent `Given I run` and `When I run` steps in the scenario. The path can be relative to the scenario root (`/smoko-work`) or absolute. The directory must already exist; if not, the scenario fails immediately with a clear error. `Then` file/directory assertions always use paths relative to `/smoko-work` regardless of this step.
+`Given` file and directory setup paths are confined to `/smoko-work`. Relative paths are resolved under `/smoko-work`, absolute setup paths must already be under `/smoko-work`, and `..` path segments are rejected.
+
+`Given the working directory is "path"` sets the working directory for all subsequent `Given I run` and `When I run` steps in the scenario. The path can be relative to the scenario root (`/smoko-work`) or absolute under `/smoko-work`. The directory must already exist; if not, the scenario fails immediately with a clear error. `..` path segments are rejected. `Then` file/directory assertions use paths relative to `/smoko-work` unless an absolute assertion path is provided.
 
 To reset the working directory back to the scenario root mid-scenario, use an absolute path:
 
@@ -248,6 +250,8 @@ Then file "path/to/file" is empty
 Then file "path/to/file" is not empty
 Then directory "path/to/dir" exists
 ```
+
+File and directory assertion paths use the same relative path rule: relative paths resolve under `/smoko-work`. Absolute assertion paths are allowed for checking files created elsewhere in the container, such as `/tmp/out.txt`, but any `..` path segment is rejected.
 
 `equals` trims leading/trailing whitespace before comparing (both sides), so trailing newlines are ignored.
 JSON `equals` compares parsed JSON values, not strings. Use JSON literals such as `"Alice"`, `3`, `true`, `null`, or block JSON for arrays and objects.
@@ -400,7 +404,7 @@ Feature: Project Detection
     Then file "src/App/App.csproj" exists
 ```
 
-`Then` file paths remain relative to `/smoko-work` (the scenario root), not the working directory.
+`Then` file paths remain relative to `/smoko-work` (the scenario root), not the working directory, unless you provide an absolute assertion path. `..` path segments are rejected.
 
 To reset back to `/smoko-work` mid-scenario, use an absolute path:
 

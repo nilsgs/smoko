@@ -58,3 +58,52 @@ func TestParseBatchFSCheckOutputReportsMissingFile(t *testing.T) {
 	require.Error(t, results[0].Err)
 	assert.Contains(t, results[0].Err.Error(), "missing.txt")
 }
+
+func TestWorkPathResolvesUnderWorkDir(t *testing.T) {
+	got, err := WorkPath("project/file.txt")
+
+	require.NoError(t, err)
+	assert.Equal(t, "/smoko-work/project/file.txt", got)
+}
+
+func TestWorkPathAllowsAbsoluteWorkDirPath(t *testing.T) {
+	got, err := WorkPath("/smoko-work/project")
+
+	require.NoError(t, err)
+	assert.Equal(t, "/smoko-work/project", got)
+}
+
+func TestWorkPathRejectsTraversal(t *testing.T) {
+	_, err := WorkPath("../outside.txt")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "..")
+}
+
+func TestWorkPathRejectsAbsoluteOutsideWorkDir(t *testing.T) {
+	_, err := WorkPath("/tmp/out.txt")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "/smoko-work")
+}
+
+func TestAssertionPathAllowsAbsoluteOutsideWorkDir(t *testing.T) {
+	got, err := AssertionPath("/tmp/out.txt")
+
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/out.txt", got)
+}
+
+func TestAssertionPathResolvesRelativeUnderWorkDir(t *testing.T) {
+	got, err := AssertionPath("out.txt")
+
+	require.NoError(t, err)
+	assert.Equal(t, "/smoko-work/out.txt", got)
+}
+
+func TestAssertionPathRejectsTraversal(t *testing.T) {
+	_, err := AssertionPath("project/../secret.txt")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "..")
+}

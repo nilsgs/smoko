@@ -86,9 +86,9 @@ Pull unique images (cached via sync.Map)
 For each Scenario (optionally parallel via --parallel N):
   1. Collect env vars from Given steps
   2. docker.CreateContainer(image, env)
-  3. Batch all Given file writes → docker.WriteFiles (single tar)
-  4. Run mkdir for explicit directory steps
-  5. On "Given the working directory is": exec `test -d` in container; update effective workdir
+  3. Batch all Given file writes → docker.WriteFiles (single tar; setup paths are confined to `/smoko-work`)
+  4. Run mkdir for explicit directory steps (also confined to `/smoko-work`)
+  5. On "Given the working directory is": resolve under `/smoko-work`, exec `test -d` in container, update effective workdir
   6. Run Given I run steps (using effective workdir); for each I save step → append var to .smoko_env
   7. Run Scenario When step (using effective workdir) → capture WhenResult
   8. Batch Then filesystem checks → docker.BatchFSCheck (single exec)
@@ -146,7 +146,8 @@ Exit code: 0 (pass), 1 (fail), 2 (error)
 
 ### Working with Docker Containers
 
-- All paths are absolute from `/smoko-work` (or prefixed with it)
+- Given file/directory setup and working-directory paths are confined to `/smoko-work`; relative paths resolve under `/smoko-work`, absolute setup paths must already be under `/smoko-work`, and `..` path segments are rejected
+- Then file/directory assertion paths resolve relative paths under `/smoko-work`; absolute assertion paths are allowed for read/check use cases, but `..` path segments are rejected
 - Commands are wrapped: `source .smoko_env; <user-command>` to inject env vars
 - File writes use tar archives (no host mounts for isolation)
 - Exit codes are captured; timeouts default to 1s (configurable)
@@ -189,6 +190,7 @@ Exit code: 0 (pass), 1 (fail), 2 (error)
 **Issue:** CLI tool can't find project root / must run from a subdirectory
 - Use `Given the working directory is "path/to/subdir"` before the `When` step
 - The directory must already exist; create it first with `Given the directory "..." exists`
+- The working directory must stay under `/smoko-work`; use environment variables such as `TMPDIR=/smoko-work/tmp` when a CLI would otherwise write to `/tmp`
 
 ## Performance Considerations
 

@@ -78,15 +78,18 @@ Given the working directory is "path/to/subdir"
 ```
 
 Behavior:
+- `Given` file and directory setup paths are confined to `/smoko-work`.
+- Relative setup paths resolve under `/smoko-work`; absolute setup paths must already be under `/smoko-work`.
+- `..` path segments are rejected in setup paths.
 - Changes the working directory for all subsequent `Given I run` and `When I run` steps in the scenario.
-- The path can be relative to the scenario root (`/smoko-work`) or absolute. Relative paths are resolved as `/smoko-work/<path>`; absolute paths are used as-is.
+- The working directory path can be relative to the scenario root (`/smoko-work`) or absolute under `/smoko-work`.
 - The directory must already exist; if not, the scenario fails immediately with a clear error.
 - Resets to `/smoko-work` automatically at the start of each new scenario.
 - To reset the working directory back to the scenario root mid-scenario, use an absolute path:
   ```gherkin
   Given the working directory is "/smoko-work"
   ```
-- `Then` file and directory assertions always use paths relative to `/smoko-work`, regardless of this step.
+- `Then` file and directory assertions use paths relative to `/smoko-work` unless an absolute assertion path is provided.
 
 Use this step when the CLI under test needs to run from a subdirectory (e.g., a tool that walks up to find a project root):
 
@@ -273,6 +276,8 @@ Then directory "path/to/dir" exists
 Then directory "path/to/dir" does not exist
 ```
 
+Assertion paths resolve relative paths under `/smoko-work`. Absolute assertion paths are allowed for checking files created elsewhere in the container, such as `/tmp/out.txt`. Any `..` path segment is rejected.
+
 ## Patterns
 
 ### Working directory for directory-aware CLIs
@@ -288,7 +293,7 @@ Given the working directory is "src/App"
 When I run "mycli bump --major"
 ```
 
-`Then` file paths remain relative to `/smoko-work` (the scenario root), not the working directory.
+`Then` file paths remain relative to `/smoko-work` (the scenario root), not the working directory, unless you provide an absolute assertion path. `..` path segments are rejected.
 
 To reset the working directory back to the scenario root after changing it, use an absolute path:
 
@@ -410,7 +415,8 @@ Scenario: CLI respects environment variables
 
 - If a `Given the working directory is` step fails, the directory does not yet exist in the container — add a `Given the directory "..." exists` step before it.
 - If a `Given` step fails before `When`, inspect the setup command or path assumptions first.
-- If a file assertion fails, remember paths are relative to `/smoko-work` unless explicitly absolute.
+- If a setup path fails, verify it stays under `/smoko-work` and does not contain `..`.
+- If a file assertion fails, remember paths are relative to `/smoko-work` unless explicitly absolute; `..` is rejected.
 - If a `Then file "$VAR/..."` path is treated as a literal string (dollar sign visible in error), the variable was not captured — check that `And I save ... as $VAR` immediately follows the `Given I run` that produced the value.
 - If regex assertions fail, verify the step uses `matches pattern`, not just `matches`.
 - If a JSON assertion fails, check whether the source is valid JSON, whether the JSONPath is valid, and whether `equals` matched exactly one node.

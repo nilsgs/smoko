@@ -376,6 +376,51 @@ func TestSetWorkdirMissingDirErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "does not exist")
 }
 
+func TestSetWorkdirRejectsAbsoluteOutsideWorkDir(t *testing.T) {
+	t.Parallel()
+
+	fd := &fakeDocker{}
+	steps := []parser.Step{
+		{ResolvedType: parser.StepGiven, Text: `the working directory is "/tmp"`},
+	}
+
+	_, _, err := executor.RunGivenSteps(context.Background(), fd, "c1", steps, 5*time.Second, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid working directory")
+	assert.Contains(t, err.Error(), "/smoko-work")
+	assert.Empty(t, fd.execCalls)
+}
+
+func TestGivenFileRejectsTraversal(t *testing.T) {
+	t.Parallel()
+
+	fd := &fakeDocker{}
+	steps := []parser.Step{
+		{ResolvedType: parser.StepGiven, Text: `a file "../outside.txt" exists`},
+	}
+
+	_, _, err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid file path")
+	assert.Contains(t, err.Error(), "..")
+	assert.Empty(t, fd.writeBatches)
+}
+
+func TestGivenDirectoryRejectsAbsoluteOutsideWorkDir(t *testing.T) {
+	t.Parallel()
+
+	fd := &fakeDocker{}
+	steps := []parser.Step{
+		{ResolvedType: parser.StepGiven, Text: `the directory "/tmp" exists`},
+	}
+
+	_, _, err := executor.RunGivenSteps(context.Background(), fd, "abc123", steps, 5*time.Second, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid directory path")
+	assert.Contains(t, err.Error(), "/smoko-work")
+	assert.Empty(t, fd.mkdirs)
+}
+
 func TestEscapedQuoteInGivenRun(t *testing.T) {
 	t.Parallel()
 

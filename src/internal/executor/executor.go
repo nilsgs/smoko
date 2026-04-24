@@ -61,11 +61,9 @@ func RunGivenSteps(ctx context.Context, dc dockerRunner, containerID string, ste
 	for _, op := range ops {
 		switch op.kind {
 		case givenOpSetWorkdir:
-			var absPath string
-			if strings.HasPrefix(op.path, "/") {
-				absPath = op.path
-			} else {
-				absPath = docker.WorkDir() + "/" + op.path
+			absPath, err := docker.WorkPath(op.path)
+			if err != nil {
+				return "", nil, fmt.Errorf("Given %q: invalid working directory %q: %w", op.stepText, op.path, err)
 			}
 			_, _, code, err := dc.ExecCommand(ctx, containerID, workdir, "test -d "+docker.ShellQuote(absPath), "", 5*time.Second)
 			if err != nil {
@@ -297,28 +295,39 @@ func classifyGivenStep(step parser.Step) (givenAction, error) {
 	text := step.Text
 
 	if m := reFileWithContent.FindStringSubmatch(text); m != nil {
+		path, err := docker.WorkPath(m[1])
+		if err != nil {
+			return givenAction{}, fmt.Errorf("Given %q: invalid file path %q: %w", text, m[1], err)
+		}
 		return givenAction{
 			kind:     givenFile,
 			stepText: text,
 			file: docker.FileEntry{
-				Path:    docker.WorkDir() + "/" + m[1],
+				Path:    path,
 				Content: step.Block,
 			},
 		}, nil
 	}
 
 	if m := reFileExists.FindStringSubmatch(text); m != nil {
+		path, err := docker.WorkPath(m[1])
+		if err != nil {
+			return givenAction{}, fmt.Errorf("Given %q: invalid file path %q: %w", text, m[1], err)
+		}
 		return givenAction{
 			kind:     givenFile,
 			stepText: text,
 			file: docker.FileEntry{
-				Path:    docker.WorkDir() + "/" + m[1],
+				Path:    path,
 				Content: "",
 			},
 		}, nil
 	}
 
 	if m := reDirExists.FindStringSubmatch(text); m != nil {
+		if _, err := docker.WorkPath(m[1]); err != nil {
+			return givenAction{}, fmt.Errorf("Given %q: invalid directory path %q: %w", text, m[1], err)
+		}
 		return givenAction{
 			kind:     givenDir,
 			stepText: text,
