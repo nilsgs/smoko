@@ -209,6 +209,8 @@ When I run "command" with input "stdin data"
 When I run "command" expecting exit code 1
 ```
 
+`expecting exit code N` records an assertion on the `When` step. If the command exits with a different code, the scenario is marked failed but subsequent `Then` assertions are still evaluated and reported.
+
 Use `\"` inside a command string to include a literal double-quote character:
 
 ```gherkin

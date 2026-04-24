@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/nskut/smoko/internal/config"
+	"github.com/nskut/smoko/internal/executor"
 	"github.com/nskut/smoko/internal/parser"
 	"github.com/nskut/smoko/internal/reporter"
 )
@@ -313,6 +314,43 @@ func TestRunTestsListSkipsConfiguredBuild(t *testing.T) {
 	err = runTests(specPath, "", config.DefaultTimeout, false, false, "", false, 1, false, true)
 
 	require.NoError(t, err)
+}
+
+func TestExpectedExitCodeAssertionPassesWhenExitCodeMatches(t *testing.T) {
+	expected := 2
+	step := parser.Step{Text: `I run "false" expecting exit code 2`, Line: 12}
+	wr := &executor.WhenResult{ExitCode: 2, ExpectedExitCode: &expected}
+
+	ar, ok := expectedExitCodeAssertion(&step, wr)
+
+	require.True(t, ok)
+	assert.True(t, ar.Pass)
+	assert.Empty(t, ar.Message)
+	assert.Equal(t, step.Text, ar.StepText)
+	assert.Equal(t, step.Line, ar.StepLine)
+}
+
+func TestExpectedExitCodeAssertionFailsWhenExitCodeDiffers(t *testing.T) {
+	expected := 1
+	step := parser.Step{Text: `I run "true" expecting exit code 1`, Line: 8}
+	wr := &executor.WhenResult{ExitCode: 0, ExpectedExitCode: &expected}
+
+	ar, ok := expectedExitCodeAssertion(&step, wr)
+
+	require.True(t, ok)
+	assert.False(t, ar.Pass)
+	assert.Equal(t, "exit code: expected 1, got 0", ar.Message)
+	assert.Equal(t, step.Text, ar.StepText)
+	assert.Equal(t, step.Line, ar.StepLine)
+}
+
+func TestExpectedExitCodeAssertionSkipsUnannotatedWhen(t *testing.T) {
+	step := parser.Step{Text: `I run "true"`, Line: 8}
+	wr := &executor.WhenResult{ExitCode: 0}
+
+	_, ok := expectedExitCodeAssertion(&step, wr)
+
+	assert.False(t, ok)
 }
 
 func step(kind parser.StepType, text string, line int) parser.Step {

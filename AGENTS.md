@@ -39,7 +39,8 @@ make test            # unit tests in Docker
   4. Tracks the effective working directory (starts at `/smoko-work`; updated by `Given the working directory is` steps)
   5. Captures stdout from `Given I run` steps and writes captured variables to `.smoko_env`
   6. Runs When step from the effective working directory (captures stdout/stderr/exit code)
-  7. Evaluates Then/And assertions
+  7. If `When I run ... expecting exit code N` is used, records that expectation as an assertion on the When step
+  8. Evaluates Then/And assertions
 - `RunGivenSteps(ctx, dc, containerID, steps, timeout, env)` returns `(workdir string, error)` — the effective working directory after all Given steps; preferred API
 - `RunGiven` (single step) is kept for compatibility, also returns `(string, error)`
 - `RunWhen(ctx, dc, containerID, step, workdir, timeout)` accepts the effective workdir returned by `RunGivenSteps`
@@ -92,9 +93,10 @@ For each Scenario (optionally parallel via --parallel N):
   5. On "Given the working directory is": resolve under `/smoko-work`, exec `test -d` in container, update effective workdir
   6. Run Given I run steps (using effective workdir); for each I save step → append var to .smoko_env
   7. Run Scenario When step (using effective workdir) → capture WhenResult
-  8. Batch Then filesystem checks → docker.BatchFSCheck (single exec)
-  9. Evaluate all Then steps against WhenResult + FSCheck results
-  10. docker.RemoveContainer
+  8. Evaluate any `expecting exit code` annotation as a When-step assertion
+  9. Batch Then filesystem checks → docker.BatchFSCheck (single exec)
+  10. Evaluate all Then steps against WhenResult + FSCheck results
+  11. docker.RemoveContainer
     ↓
 Reporter aggregates & prints results (thread-safe)
     ↓

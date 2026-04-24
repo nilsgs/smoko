@@ -367,6 +367,13 @@ func runScenario(ctx context.Context, dc *docker.Client, file string, order int,
 		return
 	}
 
+	if ar, ok := expectedExitCodeAssertion(whenStep, whenResult); ok {
+		rep.AssertionResults = append(rep.AssertionResults, ar)
+		if !ar.Pass {
+			rep.Passed = false
+		}
+	}
+
 	allResults := assertions.EvaluateAll(ctx, sc.Steps, whenResult, dc, containerID, givenEnv)
 	for _, idx := range thenIndices {
 		ar := allResults[idx]
@@ -383,6 +390,23 @@ func runScenario(ctx context.Context, dc *docker.Client, file string, order int,
 	}
 
 	return
+}
+
+func expectedExitCodeAssertion(step *parser.Step, wr *executor.WhenResult) (reporter.AssertionReport, bool) {
+	if step == nil || wr == nil || wr.ExpectedExitCode == nil {
+		return reporter.AssertionReport{}, false
+	}
+
+	expected := *wr.ExpectedExitCode
+	ar := reporter.AssertionReport{
+		Pass:     wr.ExitCode == expected,
+		StepText: step.Text,
+		StepLine: step.Line,
+	}
+	if !ar.Pass {
+		ar.Message = fmt.Sprintf("exit code: expected %d, got %d", expected, wr.ExitCode)
+	}
+	return ar, true
 }
 
 func parseOutputMode(output string) (reporter.OutputMode, error) {

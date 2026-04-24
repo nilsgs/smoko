@@ -179,6 +179,8 @@ When I run "command" with input "stdin data"
 When I run "command" expecting exit code 1
 ```
 
+This records an assertion on the `When` step. If the command exits with a different code, the scenario is marked failed but subsequent `Then` assertions are still evaluated and reported.
+
 `When` captures stdout, stderr, and exit code.
 
 ## Then
