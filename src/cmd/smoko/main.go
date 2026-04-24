@@ -29,6 +29,8 @@ var (
 	commit  = "none"
 )
 
+const maxAutoWorkers = 8
+
 func main() {
 	if err := rootCmd().Execute(); err != nil {
 		os.Exit(2)
@@ -81,7 +83,7 @@ func runCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Print stdout/stderr in the final report, including passing scenarios")
 	cmd.Flags().StringVar(&output, "output", "", "Machine-readable output format (supported: json)")
 	cmd.Flags().BoolVar(&failFast, "fail-fast", false, "Stop after the first failed scenario")
-	cmd.Flags().IntVar(&parallel, "parallel", 0, "Number of scenarios to run in parallel (0 = auto)")
+	cmd.Flags().IntVar(&parallel, "parallel", 0, "Number of scenarios to run in parallel (0 = auto, capped at 8)")
 	cmd.Flags().BoolVar(&noBuild, "no-build", false, "Skip the build step defined in .smokorc")
 	cmd.Flags().BoolVar(&list, "list", false, "List scenarios without running them")
 
@@ -284,9 +286,19 @@ func resolveTimeout(cfg config.Config, timeoutFlag int, timeoutFlagSet bool) tim
 
 func resolveWorkerCount(parallel int) int {
 	if parallel <= 0 {
-		return runtime.GOMAXPROCS(0)
+		return autoWorkerCount(runtime.GOMAXPROCS(0))
 	}
 	return parallel
+}
+
+func autoWorkerCount(maxProcs int) int {
+	if maxProcs < 1 {
+		return 1
+	}
+	if maxProcs > maxAutoWorkers {
+		return maxAutoWorkers
+	}
+	return maxProcs
 }
 
 func runScenario(ctx context.Context, dc *docker.Client, file string, order int, feat parser.Feature, sc parser.Scenario, img string, timeout time.Duration) (rep reporter.ScenarioReport) {

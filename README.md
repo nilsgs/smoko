@@ -299,7 +299,7 @@ smoko run specs/ --output json
 smoko run specs/ --no-build   # skip image build
 ```
 
-Defaults are tuned for faster feedback: `--parallel` uses auto mode by default and `--timeout` defaults to `1` second unless `.smokorc` or an explicit flag overrides it. If a setup or action command exceeds the timeout, the scenario errors and its container is removed during cleanup.
+Defaults are tuned for faster feedback: `--parallel` uses auto mode by default, capped at 8 workers, and `--timeout` defaults to `1` second unless `.smokorc` or an explicit flag overrides it. If a setup or action command exceeds the timeout, the scenario errors and its container is removed during cleanup.
 
 ## CLI Flags
 
@@ -310,7 +310,7 @@ Defaults are tuned for faster feedback: `--parallel` uses auto mode by default a
 | `--verbose` | false | Include stdout/stderr in the final text report, including passing scenarios |
 | `--output` | (default text) | Machine-readable output format; currently supports `json` |
 | `--fail-fast` | false | Stop after the first failed scenario |
-| `--parallel` | 0 | Number of scenarios to run concurrently (0 = auto) |
+| `--parallel` | 0 | Number of scenarios to run concurrently (0 = auto, capped at 8) |
 | `--no-build` | false | Skip the build step defined in .smokorc |
 | `--list` | false | Validate and list scenarios without building or running them |
 

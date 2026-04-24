@@ -431,7 +431,7 @@ Scenario: CLI respects environment variables
 
 ## Performance
 
-- Prefer `smoko run specs/ --parallel 0` for normal runs so Smoko auto-sizes concurrency.
+- Prefer `smoko run specs/ --parallel 0` for normal runs so Smoko auto-sizes concurrency, capped at 8 workers.
 - Keep the default `1` second timeout unless the command or image is genuinely slow.
 - Use `Background` for repeated setup instead of duplicating expensive `Given` steps in every scenario.
 - Prefer file-based setup steps over long shell setup sequences when both express the same intent.

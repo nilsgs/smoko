@@ -23,6 +23,7 @@ func TestRunCmdDefaults(t *testing.T) {
 
 	assert.Equal(t, "1", cmd.Flags().Lookup("timeout").DefValue)
 	assert.Equal(t, "0", cmd.Flags().Lookup("parallel").DefValue)
+	assert.Contains(t, cmd.Flags().Lookup("parallel").Usage, "capped at 8")
 	assert.Equal(t, "", cmd.Flags().Lookup("output").DefValue)
 }
 
@@ -45,9 +46,24 @@ func TestResolveTimeoutUsesFlagWhenSet(t *testing.T) {
 }
 
 func TestResolveWorkerCountUsesAutoForZeroOrLess(t *testing.T) {
-	workers := resolveWorkerCount(0)
+	for _, input := range []int{0, -1} {
+		workers := resolveWorkerCount(input)
 
-	assert.Equal(t, runtime.GOMAXPROCS(0), workers)
+		assert.GreaterOrEqual(t, workers, 1)
+		assert.LessOrEqual(t, workers, maxAutoWorkers)
+	}
+}
+
+func TestAutoWorkerCountCapsLargeProcessorCounts(t *testing.T) {
+	workers := autoWorkerCount(64)
+
+	assert.Equal(t, maxAutoWorkers, workers)
+}
+
+func TestAutoWorkerCountUsesSmallerProcessorCounts(t *testing.T) {
+	workers := autoWorkerCount(2)
+
+	assert.Equal(t, 2, workers)
 }
 
 func TestResolveWorkerCountUsesExplicitValue(t *testing.T) {

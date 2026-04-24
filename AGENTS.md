@@ -205,7 +205,7 @@ Exit code: 0 (pass), 1 (fail), 2 (error)
 - **Then filesystem assertions are batched**: `EvaluateAll` groups file-exists/dir-exists/read-file checks into a single `docker exec` per scenario
 - **Image pull verification is cached**: `PullIfMissing` uses a `sync.Map` on `docker.Client` so the same image is only inspected once per run
 - **Regex patterns are cached**: user-provided patterns in `output matches pattern` assertions are compiled once and reused via `sync.Map` in the assertions package
-- **Parallel execution**: use `--parallel N` (or `--parallel 0` for auto) to run scenarios concurrently; each scenario is already isolated in its own container
+- **Parallel execution**: use `--parallel N` (or `--parallel 0` for auto, capped at 8 workers) to run scenarios concurrently; each scenario is already isolated in its own container
 
 ## Style & Conventions
 
