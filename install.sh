@@ -3,17 +3,9 @@ set -euo pipefail
 
 INSTALL_DIR="$HOME/.smoko/bin"
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-VERSION=$(cat "$REPO_DIR/VERSION")
-COMMIT=$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
-echo "Building smoko v${VERSION}+${COMMIT}..."
-cd "$REPO_DIR/src"
-go build -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" -o "$REPO_DIR/smoko" ./cmd/smoko
-
-echo "Installing to $INSTALL_DIR..."
-mkdir -p "$INSTALL_DIR"
-mv "$REPO_DIR/smoko" "$INSTALL_DIR/smoko"
-chmod +x "$INSTALL_DIR/smoko"
+sh "$REPO_DIR/scripts/build.sh"
+sh "$REPO_DIR/scripts/install.sh"
 
 # Add to PATH if not already present
 add_to_path() {

@@ -5,10 +5,11 @@ Smoke testing tool for CLI apps. BDD-style `.smoko` DSL executed in isolated Doc
 ## Commands
 
 ```bash
-make build           # binary → repo root
-make install         # → GOPATH/bin
-make test-local      # unit tests (no Docker)
-make test            # unit tests in Docker
+task build           # binary -> dist/
+task install         # copy dist binary to ~/.smoko/bin
+task test            # unit tests (no Docker)
+task smoke           # smoke specs using the local dist binary
+task ci              # test, build, smoke
 ```
 
 ## Architecture Overview
@@ -29,19 +30,19 @@ make test            # unit tests in Docker
 - Working directory: `/smoko-work` inside container
 - `WriteFiles(ctx, containerID, []FileEntry)` uploads multiple files in a single tar archive
 - `BatchFSCheck(ctx, containerID, []FSCheck)` runs multiple filesystem checks in one `docker exec`
-- `PullIfMissing` caches results in `sync.Map` — same image is only inspected once per run
+- `PullIfMissing` caches results in `sync.Map` â€” same image is only inspected once per run
 
 **Executor** (`src/internal/executor/`)
 - Coordinates scenario execution:
   1. Collects environment variables from Given steps
   2. Creates container with those env vars
-  3. Runs Given steps — **batched** via `RunGivenSteps`: file writes go into one tar upload, dir creation uses separate exec only when needed
+  3. Runs Given steps â€” **batched** via `RunGivenSteps`: file writes go into one tar upload, dir creation uses separate exec only when needed
   4. Tracks the effective working directory (starts at `/smoko-work`; updated by `Given the working directory is` steps)
   5. Captures stdout from `Given I run` steps and writes captured variables to `.smoko_env`
   6. Runs When step from the effective working directory (captures stdout/stderr/exit code)
   7. If `When I run ... expecting exit code N` is used, records that expectation as an assertion on the When step
   8. Evaluates Then/And assertions
-- `RunGivenSteps(ctx, dc, containerID, steps, timeout, env)` returns `(workdir string, error)` — the effective working directory after all Given steps; preferred API
+- `RunGivenSteps(ctx, dc, containerID, steps, timeout, env)` returns `(workdir string, error)` â€” the effective working directory after all Given steps; preferred API
 - `RunGiven` (single step) is kept for compatibility, also returns `(string, error)`
 - `RunWhen(ctx, dc, containerID, step, workdir, timeout)` accepts the effective workdir returned by `RunGivenSteps`
 - Variable capture: `And I save output/JSON path/pattern as $VAR` steps append to `.smoko_env`; captured variables are available to shell commands and expanded in assertion path arguments, but setup file content blocks are literal
@@ -52,14 +53,14 @@ make test            # unit tests in Docker
 - Evaluates Then/And steps against captured WhenResult and container filesystem
 - Regex pattern matching via Go's `regexp` (RE2 dialect); patterns cached in `sync.Map`
 - Assertion step regexes are anchored so unsupported trailing text is rejected as an unknown assertion
-- `EvaluateAll(ctx, steps, wr, dc, containerID)` is the preferred API — batches all filesystem checks into one docker exec before evaluating
+- `EvaluateAll(ctx, steps, wr, dc, containerID)` is the preferred API â€” batches all filesystem checks into one docker exec before evaluating
 - `Evaluate(ctx, step, wr, dc, containerID)` handles a single step (used as fallback)
 - Supports: exit codes, output contains/matches/equals/empty, file/directory existence, file content, JSON path assertions
 - Fuzzy hints: unknown Then steps suggest closest known pattern via `src/internal/hints`
 
 **Reporter** (`src/internal/reporter/`)
 - Collects scenario results and prints colored output
-- Per-scenario: `✓ feature / scenario` or `✗ feature / scenario`
+- Per-scenario: `âœ“ feature / scenario` or `âœ— feature / scenario`
 - Failure details: assertion failures, actual vs expected
 - Summary line: `N passed, M failed (total)`
 - Build and Docker image readiness status is written to stderr so JSON stdout remains parseable; successful build output streams only with `--verbose`, while failed builds print captured output
@@ -68,40 +69,40 @@ make test            # unit tests in Docker
 
 **Config** (`src/internal/config/`)
 - Loads `.smokorc` (TOML format)
-- Fields: `image` (string), `timeout` (int seconds), `build` (string — command to build Docker image)
+- Fields: `image` (string), `timeout` (int seconds), `build` (string â€” command to build Docker image)
 - Image resolution precedence: `--image` flag > `Image:` in .smoko > `.smokorc` default
 - When `build` is set and `--no-build` is not passed, the build command runs before image pull; `--list` skips the build command
 
 **Hints** (`src/internal/hints/`)
-- `Suggest(text, patterns []string) string` — Levenshtein distance on normalised step text
+- `Suggest(text, patterns []string) string` â€” Levenshtein distance on normalised step text
 - Used by executor and assertions to suggest the closest known step pattern on unknown input
 
 ### Data Flow
 
 ```
 .smoko files
-    ↓
-Parse → []Feature{[]Scenario{[]Step}}
-    ↓
+    â†“
+Parse â†’ []Feature{[]Scenario{[]Step}}
+    â†“
 Run build command (if .smokorc has build = "..." and --no-build not set, except for --list)
-    ↓
+    â†“
 Report and pull/check unique images (cached via sync.Map)
-    ↓
+    â†“
 For each Scenario (optionally parallel via --parallel N):
   1. Collect env vars from Given steps
   2. docker.CreateContainer(image, env)
-  3. Batch all Given file writes → docker.WriteFiles (single tar; setup paths are confined to `/smoko-work`)
+  3. Batch all Given file writes â†’ docker.WriteFiles (single tar; setup paths are confined to `/smoko-work`)
   4. Run mkdir for explicit directory steps (also confined to `/smoko-work`)
   5. On "Given the working directory is": resolve under `/smoko-work`, exec `test -d` in container, update effective workdir
-  6. Run Given I run steps (using effective workdir); for each I save step → append var to .smoko_env
-  7. Run Scenario When step (using effective workdir) → capture WhenResult
+  6. Run Given I run steps (using effective workdir); for each I save step â†’ append var to .smoko_env
+  7. Run Scenario When step (using effective workdir) â†’ capture WhenResult
   8. Evaluate any `expecting exit code` annotation as a When-step assertion
-  9. Batch Then filesystem checks → docker.BatchFSCheck (single exec)
+  9. Batch Then filesystem checks â†’ docker.BatchFSCheck (single exec)
   10. Evaluate all Then steps against WhenResult + FSCheck results
   11. docker.RemoveContainer
-    ↓
+    â†“
 Reporter aggregates & prints results (thread-safe)
-    ↓
+    â†“
 Exit code: 0 (pass), 1 (fail), 2 (error)
 ```
 
@@ -133,7 +134,7 @@ Exit code: 0 (pass), 1 (fail), 2 (error)
 2. Add a case in `classifyGivenStep()` to match and return a `givenAction` with the appropriate `givenKind`
 3. If the kind requires a new op type, add a `givenOpKind` constant and handle it in `buildGivenOps()` and `RunGivenSteps()`
 4. Add the step pattern string to `knownGivenPatterns` for fuzzy hints
-5. Example: `Given the directory "X" exists` → `givenDir` kind → `givenOpMakeDir` → `dc.MakeDir(ctx, containerID, path)`
+5. Example: `Given the directory "X" exists` â†’ `givenDir` kind â†’ `givenOpMakeDir` â†’ `dc.MakeDir(ctx, containerID, path)`
 
 ### Adding a New Then Assertion
 

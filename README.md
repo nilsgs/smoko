@@ -1,6 +1,6 @@
 ![Banner](img/banner.png)
 
-# Smoko — Smoke Test Tool
+# Smoko â€” Smoke Test Tool
 
 A platform-agnostic smoke testing tool for CLI applications. Write tests in a Gherkin-inspired BDD-style DSL and execute them in isolated Docker containers.
 
@@ -30,11 +30,11 @@ bash install.sh
 
 Both scripts build the binary from source, install it to `~/.smoko/bin` (or `%USERPROFILE%\.smoko\bin` on Windows), and add it to your `PATH`.
 
-**Or build manually with Make:**
+**Or build manually with Task:**
 
 ```bash
-make build      # → smoko.exe in the repo root
-make install    # → installs to GOPATH/bin via go install
+task build      # -> dist/smoko or dist/smoko.exe
+task install    # -> copies the dist binary to ~/.smoko/bin
 ```
 
 ### Writing Tests
@@ -86,13 +86,13 @@ Build and Docker image readiness status is written to stderr, so JSON mode keeps
 Create a `Dockerfile.test` that builds and packages your CLI:
 
 ```dockerfile
-# Build stage — compile your CLI
+# Build stage â€” compile your CLI
 FROM golang:1.22 AS builder
 WORKDIR /build
 COPY src/ .
 RUN go build -o /usr/local/bin/mycli .
 
-# Runtime stage — minimal image with your CLI
+# Runtime stage â€” minimal image with your CLI
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends bash && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /usr/local/bin/mycli /usr/local/bin/mycli
@@ -116,21 +116,25 @@ build   = "docker build -f Dockerfile.test -t mycli-test:latest ."
 
 ```
 myproject/
-├── .smokorc
-├── Dockerfile.test
-├── specs/
-│   ├── init.smoko     # one file per command / feature area
-│   ├── commands.smoko
-│   └── errors.smoko
-└── src/
-    └── ...
+â”œâ”€â”€ .smokorc
+â”œâ”€â”€ Dockerfile.test
+â”œâ”€â”€ specs/
+â”‚   â”œâ”€â”€ init.smoko     # one file per command / feature area
+â”‚   â”œâ”€â”€ commands.smoko
+â”‚   â””â”€â”€ errors.smoko
+â””â”€â”€ src/
+    â””â”€â”€ ...
 ```
 
-### Makefile
+### Taskfile
 
-```makefile
-smoko:
-	smoko run
+```yaml
+version: '3'
+
+tasks:
+  smoke:
+    cmds:
+      - smoko run
 ```
 
 With `build` in `.smokorc`, `smoko run` builds the image and runs the tests in one step.
@@ -342,26 +346,26 @@ JSON mode emits one final document to stdout with summary counts, suite duration
 
 ```
 smoko/
-├── README.md
-├── VERSION                # Current version (e.g. 0.1.0)
-├── Makefile
-├── install.sh             # Unix installer
-├── install.ps1            # Windows installer
-├── .gitignore
-├── .copilot-instructions.md
-└── src/
-    ├── go.mod
-    ├── go.sum
-    ├── cmd/
-    │   └── smoko/
-    │       └── main.go
-    └── internal/
-        ├── config/
-        ├── parser/
-        ├── docker/
-        ├── executor/
-        ├── assertions/
-        └── reporter/
+â”œâ”€â”€ README.md
+â”œâ”€â”€ VERSION                # Current version (e.g. 0.1.0)
+â”œâ”€â”€ Taskfile.yml
+â”œâ”€â”€ install.sh             # Unix installer
+â”œâ”€â”€ install.ps1            # Windows installer
+â”œâ”€â”€ .gitignore
+â”œâ”€â”€ .copilot-instructions.md
+â””â”€â”€ src/
+    â”œâ”€â”€ go.mod
+    â”œâ”€â”€ go.sum
+    â”œâ”€â”€ cmd/
+    â”‚   â””â”€â”€ smoko/
+    â”‚       â””â”€â”€ main.go
+    â””â”€â”€ internal/
+        â”œâ”€â”€ config/
+        â”œâ”€â”€ parser/
+        â”œâ”€â”€ docker/
+        â”œâ”€â”€ executor/
+        â”œâ”€â”€ assertions/
+        â””â”€â”€ reporter/
 ```
 
 ## Examples
@@ -464,22 +468,27 @@ Feature: JSON File Generation
 
 ## Development
 
-### Build
+Prerequisites:
+
+- Go 1.25+
+- Task v3, installed from the official instructions: <https://taskfile.dev/docs/installation>
+- Docker or Podman for `task smoke` and `task ci`
 
 ```bash
-make build        # build for current platform → smoko.exe
-make install      # go install to GOPATH/bin
-make cross        # cross-compile for all platforms → dist/
-make clean        # remove build artifacts
+task test     # native Go tests
+task build    # build local binary into dist/
+task install  # copy dist/smoko to ~/.smoko/bin
+task smoke    # run specs with the local dist binary
+task ci       # run test, build, and smoke
+task cross    # build the full OS/architecture matrix into dist/
+task clean    # remove dist/
 ```
 
-### Test
+Equivalent native Go test command for debugging Task itself:
 
 ```bash
-make test-local   # run unit tests locally
-make test         # run unit tests inside a Docker container
+cd src && go test ./... -v -count=1
 ```
-
 ### Version
 
 The version is read from `VERSION` at build time and embedded in the binary via `-ldflags`:

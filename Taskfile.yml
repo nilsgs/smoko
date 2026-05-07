@@ -1,0 +1,62 @@
+version: '3'
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  build:
+    desc: Build the local binary into dist/
+    cmds:
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1
+        platforms: [windows]
+      - cmd: sh scripts/build.sh
+        platforms: [linux, darwin]
+
+  test:
+    desc: Run native Go tests
+    dir: src
+    cmds:
+      - go test ./... -v -count=1
+
+  smoke:
+    desc: Run Smoko smoke specs with the local dist binary
+    deps: [build]
+    cmds:
+      - cmd: .\dist\smoko.exe run specs/ --parallel 0
+        platforms: [windows]
+      - cmd: ./dist/smoko run specs/ --parallel 0
+        platforms: [linux, darwin]
+
+  ci:
+    desc: Run test, build, and smoke
+    cmds:
+      - task: test
+      - task: build
+      - task: smoke
+
+  cross:
+    desc: Build the full OS/architecture matrix into dist/
+    cmds:
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cross.ps1
+        platforms: [windows]
+      - cmd: sh scripts/cross.sh
+        platforms: [linux, darwin]
+
+  install:
+    desc: Build and copy the local binary to the user install directory
+    deps: [build]
+    cmds:
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1
+        platforms: [windows]
+      - cmd: sh scripts/install.sh
+        platforms: [linux, darwin]
+
+  clean:
+    desc: Remove dist/
+    cmds:
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path -LiteralPath 'dist') { Remove-Item -LiteralPath 'dist' -Recurse -Force }"
+        platforms: [windows]
+      - cmd: rm -rf dist
+        platforms: [linux, darwin]
