@@ -17,6 +17,7 @@ const (
 	TokThen                        // Then
 	TokAnd                         // And
 	TokBut                         // But
+	TokTag                         // @tag
 	TokBlock                       // indented continuation line
 	TokComment                     // # ...
 	TokBlank                       // empty line
@@ -30,7 +31,7 @@ type Token struct {
 	Indent  int    // number of leading spaces (used for block detection)
 }
 
-// keywords maps prefix → TokenKind and the offset past the keyword.
+// keywords maps prefix -> TokenKind and the offset past the keyword.
 var keywords = []struct {
 	prefix string
 	kind   TokenKind
@@ -83,6 +84,10 @@ func Tokenize(lines []string) []Token {
 		// Regular comment detection (only outside block context)
 		if strings.HasPrefix(trimmed, "#") {
 			tokens = append(tokens, Token{Kind: TokComment, Payload: trimmed[1:], Line: lineNum})
+			continue
+		}
+		if strings.HasPrefix(trimmed, "@") {
+			tokens = append(tokens, Token{Kind: TokTag, Payload: trimmed, Line: lineNum, Indent: indent})
 			continue
 		}
 

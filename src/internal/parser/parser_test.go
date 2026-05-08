@@ -80,12 +80,12 @@ func TestParseAndBut(t *testing.T) {
 
 	// Steps: Given, And(Given), When, Then, And(Then), But(Then)
 	assert.Equal(t, parser.StepGiven, sc.Steps[0].ResolvedType)
-	assert.Equal(t, parser.StepGiven, sc.Steps[1].ResolvedType) // And → Given
+	assert.Equal(t, parser.StepGiven, sc.Steps[1].ResolvedType) // And -> Given
 	assert.Equal(t, parser.StepAnd, sc.Steps[1].Type)
 	assert.Equal(t, parser.StepWhen, sc.Steps[2].ResolvedType)
 	assert.Equal(t, parser.StepThen, sc.Steps[3].ResolvedType)
-	assert.Equal(t, parser.StepThen, sc.Steps[4].ResolvedType) // And → Then
-	assert.Equal(t, parser.StepThen, sc.Steps[5].ResolvedType) // But → Then
+	assert.Equal(t, parser.StepThen, sc.Steps[4].ResolvedType) // And -> Then
+	assert.Equal(t, parser.StepThen, sc.Steps[5].ResolvedType) // But -> Then
 }
 
 func TestParseMultiLineBlock(t *testing.T) {
@@ -145,4 +145,80 @@ func TestParseMultipleScenarios(t *testing.T) {
 	assert.Len(t, features[0].Scenarios, 2)
 	assert.Equal(t, "First", features[0].Scenarios[0].Name)
 	assert.Equal(t, "Second", features[0].Scenarios[1].Name)
+}
+
+func TestParseFeatureAndScenarioTags(t *testing.T) {
+	src := `@cli @git
+Feature: Tagged
+
+  @dirty
+  # comments between tags and scenarios are allowed
+  @requires-docker
+  Scenario: Dirty repo
+    When I run "true"
+    Then exit code is 0
+
+  @clean
+  Scenario: Clean repo
+    When I run "true"
+    Then exit code is 0
+`
+	features, err := parser.ParseFile("test.smoko", src)
+	require.NoError(t, err)
+	require.Len(t, features, 1)
+
+	assert.Equal(t, []string{"cli", "git"}, features[0].Tags)
+	require.Len(t, features[0].Scenarios, 2)
+	assert.Equal(t, []string{"dirty", "requires-docker"}, features[0].Scenarios[0].Tags)
+	assert.Equal(t, []string{"clean"}, features[0].Scenarios[1].Tags)
+}
+
+func TestParseTagsBeforeNextFeature(t *testing.T) {
+	src := `Feature: First
+  Scenario: One
+    When I run "true"
+    Then exit code is 0
+
+@second
+Feature: Second
+  Scenario: Two
+    When I run "true"
+    Then exit code is 0
+`
+	features, err := parser.ParseFile("test.smoko", src)
+	require.NoError(t, err)
+	require.Len(t, features, 2)
+
+	assert.Empty(t, features[0].Tags)
+	assert.Equal(t, []string{"second"}, features[1].Tags)
+}
+
+func TestParseRejectsInvalidTagSyntax(t *testing.T) {
+	src := `@needs.docker
+Feature: Invalid
+  Scenario: One
+    When I run "true"
+    Then exit code is 0
+`
+	_, err := parser.ParseFile("test.smoko", src)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "test.smoko:1")
+	assert.Contains(t, err.Error(), "must match")
+}
+
+func TestParseRejectsTagsBeforeBackground(t *testing.T) {
+	src := `Feature: Invalid
+  @setup
+  Background:
+    Given a file "x" exists
+
+  Scenario: One
+    When I run "true"
+    Then exit code is 0
+`
+	_, err := parser.ParseFile("test.smoko", src)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tags may only apply to Feature or Scenario")
 }

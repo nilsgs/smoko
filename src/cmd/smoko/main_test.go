@@ -25,6 +25,8 @@ func TestRunCmdDefaults(t *testing.T) {
 	assert.Equal(t, "0", cmd.Flags().Lookup("parallel").DefValue)
 	assert.Contains(t, cmd.Flags().Lookup("parallel").Usage, "capped at 8")
 	assert.Equal(t, "", cmd.Flags().Lookup("output").DefValue)
+	assert.NotNil(t, cmd.Flags().Lookup("tag"))
+	assert.NotNil(t, cmd.Flags().Lookup("skip-tag"))
 }
 
 func TestResolveTimeoutUsesBuiltInDefault(t *testing.T) {
@@ -91,6 +93,104 @@ func TestParseOutputModeRejectsUnknownValue(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "supported: json")
+}
+
+func TestNewTagFilterNormalizesCLIValues(t *testing.T) {
+	filter, err := newTagFilter([]string{"@git", "cli", "git"}, []string{"@slow"})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"cli", "git"}, filter.include)
+	assert.Equal(t, []string{"slow"}, filter.exclude)
+}
+
+func TestNewTagFilterRejectsInvalidCLIValue(t *testing.T) {
+	_, err := newTagFilter([]string{"needs.docker"}, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--tag")
+	assert.Contains(t, err.Error(), "must match")
+}
+
+func TestBuildScenarioJobsFiltersTags(t *testing.T) {
+	files := []parsedFile{{
+		name: "test.smoko",
+		features: []parser.Feature{{
+			Name:  "Tagged",
+			Image: "alpine",
+			Tags:  []string{"cli"},
+			Scenarios: []parser.Scenario{
+				{Name: "Git clean", Tags: []string{"git"}, Line: 1},
+				{Name: "Git slow", Tags: []string{"git", "slow"}, Line: 2},
+				{Name: "Docs", Tags: []string{"docs"}, Line: 3},
+			},
+		}},
+	}}
+	filter := tagFilter{include: []string{"git", "docs"}, exclude: []string{"slow"}}
+
+	jobs, err := buildScenarioJobs(files, time.Second, filter)
+
+	require.NoError(t, err)
+	require.Len(t, jobs, 2)
+	assert.Equal(t, "Git clean", jobs[0].sc.Name)
+	assert.Equal(t, []string{"cli", "git"}, jobs[0].tags)
+	assert.Equal(t, "Docs", jobs[1].sc.Name)
+	assert.Equal(t, []string{"cli", "docs"}, jobs[1].tags)
+}
+
+func TestBuildScenarioJobsIgnoresImageForFilteredOutScenarios(t *testing.T) {
+	files := []parsedFile{{
+		name: "test.smoko",
+		features: []parser.Feature{
+			{
+				Name:      "Selected",
+				Image:     "alpine",
+				Tags:      []string{"run"},
+				Scenarios: []parser.Scenario{{Name: "Runs", Line: 1}},
+			},
+			{
+				Name:      "Skipped missing image",
+				Tags:      []string{"skip"},
+				Scenarios: []parser.Scenario{{Name: "Skipped", Line: 2}},
+			},
+		},
+	}}
+	filter := tagFilter{include: []string{"run"}}
+
+	jobs, err := buildScenarioJobs(files, time.Second, filter)
+
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+	assert.Equal(t, "Runs", jobs[0].sc.Name)
+	jobs, err = resolveScenarioJobImages(jobs, "", "")
+	require.NoError(t, err)
+	assert.Equal(t, "alpine", jobs[0].img)
+}
+
+func TestListScenariosShowsTags(t *testing.T) {
+	files := []parsedFile{{
+		name: "test.smoko",
+		features: []parser.Feature{{
+			Name:  "Tagged",
+			Image: "alpine",
+			Tags:  []string{"cli"},
+			Scenarios: []parser.Scenario{
+				{Name: "Git clean", Tags: []string{"git"}, Line: 1},
+				{Name: "Plain", Line: 2},
+			},
+		}},
+	}}
+	jobs, err := buildScenarioJobs(files, time.Second, tagFilter{})
+	require.NoError(t, err)
+	var buf bytes.Buffer
+
+	err = listScenarios(&buf, jobs)
+
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "Feature: Tagged [@cli]")
+	assert.Contains(t, out, "- Git clean [@cli @git]")
+	assert.Contains(t, out, "- Plain [@cli]")
+	assert.Contains(t, out, "1 feature(s), 2 scenario(s)")
 }
 
 func echoCmd(msg string) string {
@@ -160,7 +260,7 @@ func TestRunBuildPrintsOutputOnFailure(t *testing.T) {
 }
 
 func TestRunBuildVerboseStreamsOutput(t *testing.T) {
-	// In verbose mode runBuild streams directly — it should not return an error on success.
+	// In verbose mode runBuild streams directly, so it should not return an error on success.
 	err := runBuild(echoCmd("verbose-output"), t.TempDir(), reporter.OutputModeText, true)
 	require.NoError(t, err)
 }
@@ -302,7 +402,7 @@ func TestRunTestsListValidatesScenarioOrder(t *testing.T) {
 `), 0644)
 	require.NoError(t, err)
 
-	err = runTests(specPath, "", config.DefaultTimeout, false, false, "", false, 1, true, true)
+	err = runTests(specPath, "", config.DefaultTimeout, false, false, "", false, 1, true, true, nil, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "after the When")
@@ -327,7 +427,7 @@ func TestRunTestsListSkipsConfiguredBuild(t *testing.T) {
 `), 0644)
 	require.NoError(t, err)
 
-	err = runTests(specPath, "", config.DefaultTimeout, false, false, "", false, 1, false, true)
+	err = runTests(specPath, "", config.DefaultTimeout, false, false, "", false, 1, false, true, nil, nil)
 
 	require.NoError(t, err)
 }

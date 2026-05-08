@@ -93,6 +93,7 @@ func TestJSONSummaryIncludesDurationsAndStableOrder(t *testing.T) {
 		FeatureName:  "B",
 		ScenarioName: "Later",
 		ScenarioLine: 20,
+		Tags:         []string{"git", "slow"},
 		Duration:     2 * time.Second,
 		Passed:       true,
 		ExitCode:     &exitCode,
@@ -127,4 +128,5 @@ func TestJSONSummaryIncludesDurationsAndStableOrder(t *testing.T) {
 	assert.Equal(t, "Later", second["scenario"])
 	assert.Equal(t, "1.5s", first["duration"])
 	assert.Equal(t, "2s", second["duration"])
+	assert.Equal(t, []any{"git", "slow"}, second["tags"])
 }

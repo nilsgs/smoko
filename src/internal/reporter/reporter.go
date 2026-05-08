@@ -33,6 +33,7 @@ type ScenarioReport struct {
 	FeatureName      string            `json:"feature"`
 	ScenarioName     string            `json:"scenario"`
 	ScenarioLine     int               `json:"scenario_line,omitempty"`
+	Tags             []string          `json:"tags,omitempty"`
 	Passed           bool              `json:"-"`
 	Duration         time.Duration     `json:"-"`
 	AssertionResults []AssertionReport `json:"assertions"`
@@ -55,6 +56,7 @@ type jsonScenario struct {
 	Feature      string            `json:"feature"`
 	Scenario     string            `json:"scenario"`
 	ScenarioLine int               `json:"scenario_line,omitempty"`
+	Tags         []string          `json:"tags,omitempty"`
 	Status       string            `json:"status"`
 	Duration     string            `json:"duration"`
 	ExitCode     *int              `json:"exit_code,omitempty"`
@@ -415,6 +417,7 @@ func buildJSONScenarios(reports []ScenarioReport) []jsonScenario {
 			Feature:      rep.FeatureName,
 			Scenario:     rep.ScenarioName,
 			ScenarioLine: rep.ScenarioLine,
+			Tags:         rep.Tags,
 			Status:       scenarioStatus(rep),
 			Duration:     formatDuration(rep.Duration),
 			ExitCode:     rep.ExitCode,

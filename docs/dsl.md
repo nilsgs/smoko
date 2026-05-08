@@ -5,6 +5,7 @@ Smoko specs use a small Gherkin-style format.
 ## Feature
 
 ```gherkin
+@cli @linux
 Feature: Feature Name
   Optional description.
 
@@ -16,6 +17,7 @@ Feature: Feature Name
 ## Scenario
 
 ```gherkin
+@smoke
 Scenario: Scenario name
   Given setup steps
   When I run "command"
@@ -26,6 +28,47 @@ Each scenario must have exactly one `When` step and at least one `Then`
 assertion. All `Given` setup steps must appear before `When`; all `Then`
 assertions must appear after `When`. `And` and `But` inherit the previous step
 type.
+
+## Tags
+
+Tags are metadata labels used for filtering and discovery.
+
+```gherkin
+@cli @requires-docker
+Feature: Repo commands
+
+  @git
+  @dirty
+  Scenario: Reports dirty worktree
+    When I run "mycli status"
+    Then exit code is 0
+```
+
+Feature tags apply to every scenario in that feature. Scenario tags apply only
+to that scenario. Effective scenario tags are the union of feature and scenario
+tags.
+
+Tag rules:
+
+- Tag lines may appear only immediately before `Feature:` or `Scenario:`.
+- Comments and blank lines are allowed between tag lines and the tagged item.
+- Tags in spec files must start with `@`.
+- Tag names must match `[A-Za-z0-9][A-Za-z0-9_-]*`.
+- Tag matching is case-sensitive; prefer lowercase kebab-case such as
+  `@requires-docker`.
+- Tags before `Background:` or steps are invalid.
+
+Use `--tag` and `--skip-tag` to filter scenarios:
+
+```sh
+smoko run specs/ --tag git
+smoko run specs/ --tag git --tag cli
+smoko run specs/ --skip-tag slow
+smoko run specs/ --tag git --skip-tag slow
+```
+
+Multiple `--tag` values are ORed. `--skip-tag` excludes matching scenarios and
+wins over includes. CLI tag values may be written with or without `@`.
 
 ## Background
 

@@ -49,6 +49,42 @@ Image resolution precedence:
 2. `Image:` in the `.smoko` file
 3. `.smokorc`
 
+## Tags
+
+Use tags for scenario selection and discovery.
+
+```gherkin
+@cli @requires-docker
+Feature: Repo commands
+
+  @git
+  Scenario: Reports dirty worktree
+    When I run "my-cli status"
+    Then exit code is 0
+```
+
+Rules:
+- Tags may appear only immediately before `Feature:` or `Scenario:`.
+- Feature tags apply to every scenario in that feature.
+- Scenario effective tags are feature tags plus scenario tags.
+- Tags in spec files must start with `@`.
+- Valid names match `[A-Za-z0-9][A-Za-z0-9_-]*`; prefer lowercase kebab-case in examples.
+- Tags before `Background:` or steps are invalid.
+
+Filtering:
+
+```sh
+smoko run specs/ --tag git
+smoko run specs/ --tag git --tag cli
+smoko run specs/ --skip-tag slow
+smoko run specs/ --tag git --skip-tag slow
+smoko run specs/ --list --tag git
+```
+
+Multiple `--tag` values are ORed. `--skip-tag` excludes matching scenarios and wins over includes. CLI tag values may be passed with or without `@`. If a tag filter selects zero scenarios, Smoko fails rather than reporting a passing empty run.
+
+Normal text run output stays tag-free; `--list` shows tags and JSON output includes effective scenario tags.
+
 ## Given
 
 Use `Given` for setup only.

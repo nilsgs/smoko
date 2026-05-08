@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -58,6 +59,8 @@ func runCmd() *cobra.Command {
 	var parallel int
 	var noBuild bool
 	var list bool
+	var tags []string
+	var skipTags []string
 
 	cmd := &cobra.Command{
 		Use:   "run [path]",
@@ -74,7 +77,7 @@ func runCmd() *cobra.Command {
 				}
 				return fmt.Errorf("path %q not found", path)
 			}
-			return runTests(path, image, timeout, cmd.Flags().Changed("timeout"), verbose, output, failFast, parallel, noBuild, list)
+			return runTests(path, image, timeout, cmd.Flags().Changed("timeout"), verbose, output, failFast, parallel, noBuild, list, tags, skipTags)
 		},
 	}
 
@@ -86,11 +89,13 @@ func runCmd() *cobra.Command {
 	cmd.Flags().IntVar(&parallel, "parallel", 0, "Number of scenarios to run in parallel (0 = auto, capped at 8)")
 	cmd.Flags().BoolVar(&noBuild, "no-build", false, "Skip the build step defined in .smokorc")
 	cmd.Flags().BoolVar(&list, "list", false, "List scenarios without running them")
+	cmd.Flags().StringArrayVar(&tags, "tag", nil, "Run scenarios with any of the given tags (repeatable)")
+	cmd.Flags().StringArrayVar(&skipTags, "skip-tag", nil, "Exclude scenarios with any of the given tags (repeatable)")
 
 	return cmd
 }
 
-func runTests(path, imageFlag string, timeoutFlag int, timeoutFlagSet bool, verbose bool, output string, failFast bool, parallel int, noBuild, list bool) error {
+func runTests(path, imageFlag string, timeoutFlag int, timeoutFlagSet bool, verbose bool, output string, failFast bool, parallel int, noBuild, list bool, includeTags, excludeTags []string) error {
 	suiteStart := time.Now()
 
 	outputMode, err := parseOutputMode(output)
@@ -99,6 +104,11 @@ func runTests(path, imageFlag string, timeoutFlag int, timeoutFlagSet bool, verb
 	}
 
 	rep := reporter.New(os.Stdout, verbose, outputMode, version+"+"+commit)
+
+	filter, err := newTagFilter(includeTags, excludeTags)
+	if err != nil {
+		return emitFatal(rep, outputMode, suiteStart, err)
+	}
 
 	wd, err := os.Getwd()
 	if err != nil {
@@ -136,8 +146,24 @@ func runTests(path, imageFlag string, timeoutFlag int, timeoutFlagSet bool, verb
 		return emitFatal(rep, outputMode, suiteStart, err)
 	}
 
+	jobs, err := buildScenarioJobs(parsed, timeout, filter)
+	if err != nil {
+		return emitFatal(rep, outputMode, suiteStart, err)
+	}
+	if len(jobs) == 0 {
+		if filter.active() {
+			return emitFatal(rep, outputMode, suiteStart, fmt.Errorf("no scenarios matched tag filter: %s", filter.description()))
+		}
+		return emitFatal(rep, outputMode, suiteStart, fmt.Errorf("no scenarios found at %s", path))
+	}
+
 	if list {
-		return listScenarios(parsed)
+		return listScenarios(os.Stdout, jobs)
+	}
+
+	jobs, err = resolveScenarioJobImages(jobs, imageFlag, cfg.Image)
+	if err != nil {
+		return emitFatal(rep, outputMode, suiteStart, err)
 	}
 
 	if cfg.Build != "" && !noBuild {
@@ -151,37 +177,6 @@ func runTests(path, imageFlag string, timeoutFlag int, timeoutFlagSet bool, verb
 		return emitFatal(rep, outputMode, suiteStart, fmt.Errorf("docker: %w", err))
 	}
 	defer dc.Close()
-
-	type scenarioJob struct {
-		order   int
-		file    string
-		feat    parser.Feature
-		sc      parser.Scenario
-		img     string
-		timeout time.Duration
-	}
-
-	var jobs []scenarioJob
-	order := 0
-	for _, pf := range parsed {
-		for _, feat := range pf.features {
-			img := resolveImage(imageFlag, feat.Image, cfg.Image)
-			if img == "" {
-				return emitFatal(rep, outputMode, suiteStart, fmt.Errorf("no Docker image specified for feature %q - use --image, Image: in .smoko file, or set image in .smokorc", feat.Name))
-			}
-			for _, sc := range feat.Scenarios {
-				jobs = append(jobs, scenarioJob{
-					order:   order,
-					file:    pf.name,
-					feat:    feat,
-					sc:      sc,
-					img:     img,
-					timeout: timeout,
-				})
-				order++
-			}
-		}
-	}
 
 	ctx := context.Background()
 	seenImages := make(map[string]bool)
@@ -198,7 +193,7 @@ func runTests(path, imageFlag string, timeoutFlag int, timeoutFlagSet bool, verb
 	if workers == 1 {
 		allPassed := true
 		for _, j := range jobs {
-			result := runScenario(ctx, dc, j.file, j.order, j.feat, j.sc, j.img, j.timeout)
+			result := runScenario(ctx, dc, j.file, j.order, j.feat, j.sc, j.tags, j.img, j.timeout)
 			if !result.Passed || result.Error != nil {
 				allPassed = false
 			}
@@ -240,7 +235,7 @@ func runTests(path, imageFlag string, timeoutFlag int, timeoutFlagSet bool, verb
 				return
 			}
 
-			result := runScenario(cancelCtx, dc, job.file, job.order, job.feat, job.sc, job.img, job.timeout)
+			result := runScenario(cancelCtx, dc, job.file, job.order, job.feat, job.sc, job.tags, job.img, job.timeout)
 			if !result.Passed || result.Error != nil {
 				failed.Store(true)
 				if failFast {
@@ -295,7 +290,7 @@ func autoWorkerCount(maxProcs int) int {
 	return maxProcs
 }
 
-func runScenario(ctx context.Context, dc *docker.Client, file string, order int, feat parser.Feature, sc parser.Scenario, img string, timeout time.Duration) (rep reporter.ScenarioReport) {
+func runScenario(ctx context.Context, dc *docker.Client, file string, order int, feat parser.Feature, sc parser.Scenario, tags []string, img string, timeout time.Duration) (rep reporter.ScenarioReport) {
 	start := time.Now()
 	rep = reporter.ScenarioReport{
 		Order:        order,
@@ -303,6 +298,7 @@ func runScenario(ctx context.Context, dc *docker.Client, file string, order int,
 		FeatureName:  feat.Name,
 		ScenarioName: sc.Name,
 		ScenarioLine: sc.Line,
+		Tags:         tags,
 	}
 	allGiven := make([]parser.Step, len(feat.Background), len(feat.Background)+len(sc.Steps))
 	copy(allGiven, feat.Background)
@@ -504,6 +500,124 @@ type parsedFile struct {
 	features []parser.Feature
 }
 
+type scenarioJob struct {
+	order   int
+	file    string
+	feat    parser.Feature
+	sc      parser.Scenario
+	tags    []string
+	img     string
+	timeout time.Duration
+}
+
+type tagFilter struct {
+	include []string
+	exclude []string
+}
+
+func newTagFilter(includeTags, excludeTags []string) (tagFilter, error) {
+	include, err := normalizeCLITags(includeTags, "--tag")
+	if err != nil {
+		return tagFilter{}, err
+	}
+	exclude, err := normalizeCLITags(excludeTags, "--skip-tag")
+	if err != nil {
+		return tagFilter{}, err
+	}
+	return tagFilter{include: include, exclude: exclude}, nil
+}
+
+func normalizeCLITags(raw []string, flag string) ([]string, error) {
+	tags := make([]string, 0, len(raw))
+	for _, item := range raw {
+		tag, err := parser.NormalizeTag(item)
+		if err != nil {
+			return nil, fmt.Errorf("%s %q: %w", flag, item, err)
+		}
+		tags = append(tags, tag)
+	}
+	return parser.MergeTags(tags), nil
+}
+
+func (f tagFilter) active() bool {
+	return len(f.include) > 0 || len(f.exclude) > 0
+}
+
+func (f tagFilter) matches(tags []string) bool {
+	tagSet := make(map[string]bool, len(tags))
+	for _, tag := range tags {
+		tagSet[tag] = true
+	}
+
+	if len(f.include) > 0 {
+		matched := false
+		for _, tag := range f.include {
+			if tagSet[tag] {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+
+	for _, tag := range f.exclude {
+		if tagSet[tag] {
+			return false
+		}
+	}
+	return true
+}
+
+func (f tagFilter) description() string {
+	var parts []string
+	for _, tag := range f.include {
+		parts = append(parts, "--tag "+tag)
+	}
+	for _, tag := range f.exclude {
+		parts = append(parts, "--skip-tag "+tag)
+	}
+	return strings.Join(parts, " ")
+}
+
+func buildScenarioJobs(files []parsedFile, timeout time.Duration, filter tagFilter) ([]scenarioJob, error) {
+	var jobs []scenarioJob
+	order := 0
+	for _, pf := range files {
+		for _, feat := range pf.features {
+			for _, sc := range feat.Scenarios {
+				tags := parser.MergeTags(feat.Tags, sc.Tags)
+				if !filter.matches(tags) {
+					order++
+					continue
+				}
+				jobs = append(jobs, scenarioJob{
+					order:   order,
+					file:    pf.name,
+					feat:    feat,
+					sc:      sc,
+					tags:    tags,
+					timeout: timeout,
+				})
+				order++
+			}
+		}
+	}
+	return jobs, nil
+}
+
+func resolveScenarioJobImages(jobs []scenarioJob, imageFlag, configImage string) ([]scenarioJob, error) {
+	for i := range jobs {
+		img := resolveImage(imageFlag, jobs[i].feat.Image, configImage)
+		if img == "" {
+			return nil, fmt.Errorf("no Docker image specified for feature %q - use --image, Image: in .smoko file, or set image in .smokorc", jobs[i].feat.Name)
+		}
+		jobs[i].img = img
+	}
+	return jobs, nil
+}
+
 func validateParsedFiles(files []parsedFile) error {
 	for _, pf := range files {
 		for _, feat := range pf.features {
@@ -569,21 +683,55 @@ func validateScenario(file, featureName string, sc parser.Scenario) error {
 	return nil
 }
 
-func listScenarios(files []parsedFile) error {
+func listScenarios(w io.Writer, jobs []scenarioJob) error {
 	totalFeatures := 0
 	totalScenarios := 0
-	for _, pf := range files {
-		fmt.Printf("%s\n", pf.name)
-		for _, f := range pf.features {
-			totalFeatures++
-			fmt.Printf("  Feature: %s\n", f.Name)
-			for _, s := range f.Scenarios {
-				totalScenarios++
-				fmt.Printf("    - %s\n", s.Name)
-			}
-		}
-		fmt.Println()
+
+	type featureListKey struct {
+		file string
+		name string
 	}
-	fmt.Printf("%d feature(s), %d scenario(s)\n", totalFeatures, totalScenarios)
+
+	currentFile := ""
+	currentFeature := featureListKey{}
+	seenFeatures := make(map[featureListKey]bool)
+	for _, job := range jobs {
+		if job.file != currentFile {
+			if currentFile != "" {
+				fmt.Fprintln(w)
+			}
+			currentFile = job.file
+			currentFeature = featureListKey{}
+			fmt.Fprintf(w, "%s\n", job.file)
+		}
+
+		key := featureListKey{file: job.file, name: job.feat.Name}
+		if key != currentFeature {
+			currentFeature = key
+			if !seenFeatures[key] {
+				seenFeatures[key] = true
+				totalFeatures++
+			}
+			fmt.Fprintf(w, "  Feature: %s%s\n", job.feat.Name, formatTags(job.feat.Tags))
+		}
+
+		totalScenarios++
+		fmt.Fprintf(w, "    - %s%s\n", job.sc.Name, formatTags(job.tags))
+	}
+	if currentFile != "" {
+		fmt.Fprintln(w)
+	}
+	fmt.Fprintf(w, "%d feature(s), %d scenario(s)\n", totalFeatures, totalScenarios)
 	return nil
+}
+
+func formatTags(tags []string) string {
+	if len(tags) == 0 {
+		return ""
+	}
+	display := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		display = append(display, "@"+tag)
+	}
+	return " [" + strings.Join(display, " ") + "]"
 }

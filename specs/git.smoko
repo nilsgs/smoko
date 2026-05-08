@@ -1,6 +1,8 @@
+@git
 Feature: Git Fixtures
   Git fixture steps create disposable repositories for CLI smoke tests.
 
+  @clean
   Scenario: creates a clean repository on main
     Given a git repository "repo" exists
     When I run "git -C repo branch --show-current"
@@ -9,6 +11,7 @@ Feature: Git Fixtures
     Then git repository "repo" is clean
     Then git repository "repo" has branch "main"
 
+  @clean
   Scenario: committed file creates a repository
     Given git repository "repo" has committed file "README.md" with content:
       hello
@@ -17,6 +20,7 @@ Feature: Git Fixtures
     Then stdout equals "hello"
     Then git repository "repo" is clean
 
+  @dirty
   Scenario: untracked file makes repository dirty
     Given git repository "repo" has untracked file "scratch.txt" with content:
       dirty
@@ -25,6 +29,7 @@ Feature: Git Fixtures
     Then output contains "?? scratch.txt"
     Then git repository "repo" is dirty
 
+  @dirty
   Scenario: modified tracked file makes repository dirty
     Given git repository "repo" has committed file "README.md" with content:
       old
@@ -35,6 +40,7 @@ Feature: Git Fixtures
     Then output contains "M README.md"
     Then git repository "repo" is dirty
 
+  @branch
   Scenario: branch setup creates branch
     Given a git repository "repo" exists
     Given git repository "repo" is on branch "feature/test"

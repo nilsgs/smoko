@@ -13,7 +13,7 @@ const (
 
 // Step is a single Given/When/Then/And/But line in a scenario.
 type Step struct {
-	Type       StepType
+	Type StepType
 	// ResolvedType is the effective type after And/But inheritance (never And/But).
 	ResolvedType StepType
 	Text         string // trimmed text after the keyword
@@ -25,6 +25,7 @@ type Step struct {
 type Scenario struct {
 	Name  string
 	Steps []Step
+	Tags  []string
 	Line  int
 }
 
@@ -32,7 +33,8 @@ type Scenario struct {
 type Feature struct {
 	Name        string
 	Description string
-	Image       string     // optional inline image declaration
-	Background  []Step     // steps prepended to every scenario
+	Image       string   // optional inline image declaration
+	Tags        []string // normalized tag names without @
+	Background  []Step   // steps prepended to every scenario
 	Scenarios   []Scenario
 }

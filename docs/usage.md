@@ -90,6 +90,21 @@ List scenarios without building or running:
 smoko run specs/ --list
 ```
 
+Filter by tags:
+
+```sh
+smoko run specs/ --tag git
+smoko run specs/ --tag git --tag cli
+smoko run specs/ --skip-tag slow
+smoko run specs/ --tag git --skip-tag slow
+```
+
+Feature-level tags apply to every scenario in the feature. Scenario-level tags
+apply only to that scenario. Multiple `--tag` values are ORed; `--skip-tag`
+excludes matching scenarios and wins over includes. Filtering is applied before
+build and Docker image checks, and `--list` shows the selected scenarios with
+their effective tags.
+
 ## Output
 
 Default text output is intended for terminal inspection. It prints one status
@@ -103,6 +118,9 @@ smoko run specs/ --output json
 
 Build and Docker readiness messages are written to stderr so JSON stdout stays
 parseable.
+
+JSON output includes effective scenario tags in each scenario object when tags
+are present.
 
 ## Common Patterns
 
@@ -140,6 +158,7 @@ Scenario: Uses generated output path
 Set up a disposable Git repository:
 
 ```gherkin
+@git
 Scenario: Reports dirty working tree
   Given git repository "repo" has committed file "README.md" with content:
     hello

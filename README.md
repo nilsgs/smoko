@@ -67,6 +67,8 @@ smoko run
 smoko run specs/
 smoko run specs/ --output json
 smoko run specs/ --parallel 0
+smoko run specs/ --tag git
+smoko run specs/ --skip-tag slow
 smoko run specs/ --no-build
 ```
 
