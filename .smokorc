@@ -1,2 +1,3 @@
-image   = "alpine:latest"
+image   = "smoko-test:latest"
 timeout = 30
+build   = "docker build -f Dockerfile.test -t smoko-test:latest ."

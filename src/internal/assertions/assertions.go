@@ -559,6 +559,10 @@ func Evaluate(ctx context.Context, step parser.Step, wr *executor.WhenResult, dc
 		return pass()
 	}
 
+	if result, ok := evaluateGitAssertion(ctx, text, dc, containerID, env); ok {
+		return result
+	}
+
 	if m := reOutputEquals.FindStringSubmatch(text); m != nil {
 		negate := strings.Contains(text, "does not equal")
 		expected := unescapeString(m[1])
@@ -624,6 +628,9 @@ var knownThenPatterns = []string{
 	`file "path" equals "text"`,
 	`file "path" is empty`,
 	`file "path" is not empty`,
+	`git repository "repo" is clean`,
+	`git repository "repo" is dirty`,
+	`git repository "repo" has branch "feature/name"`,
 	`output as JSON at path "$.field" exists`,
 	`stdout as JSON at path "$.field" exists`,
 	`output as JSON at path "$.field" equals "value"`,

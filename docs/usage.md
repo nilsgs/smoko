@@ -137,6 +137,23 @@ Scenario: Uses generated output path
   Then directory "$OUTDIR" exists
 ```
 
+Set up a disposable Git repository:
+
+```gherkin
+Scenario: Reports dirty working tree
+  Given git repository "repo" has committed file "README.md" with content:
+    hello
+  Given git repository "repo" has modified file "README.md" with content:
+    changed
+  When I run "mycli status repo"
+  Then exit code is 0
+  Then git repository "repo" is dirty
+```
+
+Git fixture steps require `git` on `PATH` in the test image. They are intended
+for local repository state, not remotes, credentials, submodules, or hosted Git
+provider behavior.
+
 ## More Reference
 
 - [DSL reference](dsl.md)

@@ -1,0 +1,44 @@
+Feature: Git Fixtures
+  Git fixture steps create disposable repositories for CLI smoke tests.
+
+  Scenario: creates a clean repository on main
+    Given a git repository "repo" exists
+    When I run "git -C repo branch --show-current"
+    Then exit code is 0
+    Then stdout equals "main"
+    Then git repository "repo" is clean
+    Then git repository "repo" has branch "main"
+
+  Scenario: committed file creates a repository
+    Given git repository "repo" has committed file "README.md" with content:
+      hello
+    When I run "git -C repo show HEAD:README.md"
+    Then exit code is 0
+    Then stdout equals "hello"
+    Then git repository "repo" is clean
+
+  Scenario: untracked file makes repository dirty
+    Given git repository "repo" has untracked file "scratch.txt" with content:
+      dirty
+    When I run "git -C repo status --porcelain"
+    Then exit code is 0
+    Then output contains "?? scratch.txt"
+    Then git repository "repo" is dirty
+
+  Scenario: modified tracked file makes repository dirty
+    Given git repository "repo" has committed file "README.md" with content:
+      old
+    Given git repository "repo" has modified file "README.md" with content:
+      new
+    When I run "git -C repo status --porcelain"
+    Then exit code is 0
+    Then output contains "M README.md"
+    Then git repository "repo" is dirty
+
+  Scenario: branch setup creates branch
+    Given a git repository "repo" exists
+    Given git repository "repo" is on branch "feature/test"
+    When I run "git -C repo branch --show-current"
+    Then exit code is 0
+    Then stdout equals "feature/test"
+    Then git repository "repo" has branch "feature/test"

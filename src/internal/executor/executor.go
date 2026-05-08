@@ -185,6 +185,7 @@ const (
 	givenRun
 	givenSave       // I save output/JSON path/pattern as $VAR
 	givenSetWorkdir // the working directory is "path"
+	givenGit
 )
 
 type captureKind int
@@ -210,6 +211,7 @@ type givenAction struct {
 	path     string
 	command  string
 	capture  *captureSpec
+	git      *gitGivenAction
 }
 
 type givenOpKind int
@@ -219,6 +221,7 @@ const (
 	givenOpMakeDir
 	givenOpRunCommand
 	givenOpSetWorkdir
+	givenOpGit
 )
 
 type givenOp struct {
@@ -228,6 +231,7 @@ type givenOp struct {
 	path     string
 	command  string
 	captures []captureSpec // non-nil only for givenOpRunCommand
+	git      *gitGivenAction
 }
 
 func buildGivenOps(steps []parser.Step) ([]givenOp, error) {
@@ -278,6 +282,13 @@ func buildGivenOps(steps []parser.Step) ([]givenOp, error) {
 				kind:     givenOpRunCommand,
 				stepText: action.stepText,
 				command:  action.command,
+			})
+		case givenGit:
+			flushFiles()
+			ops = append(ops, givenOp{
+				kind:     givenOpGit,
+				stepText: action.stepText,
+				git:      action.git,
 			})
 		case givenSave:
 			if len(pendingFiles) > 0 || len(ops) == 0 || ops[len(ops)-1].kind != givenOpRunCommand {
@@ -397,6 +408,10 @@ func classifyGivenStep(step parser.Step) (givenAction, error) {
 		}, nil
 	}
 
+	if action, ok, err := classifyGitGivenStep(step); ok || err != nil {
+		return action, err
+	}
+
 	if suggestion := hints.Suggest(text, knownGivenPatterns); suggestion != "" {
 		return givenAction{}, fmt.Errorf("unknown Given step: %q\n  → did you mean: %q?", text, suggestion)
 	}
@@ -422,6 +437,11 @@ var knownGivenPatterns = []string{
 	`I save pattern "regex" as $VAR`,
 	`the working directory is "path"`,
 	`the working directory is "/smoko-work"`,
+	`a git repository "repo" exists`,
+	`git repository "repo" has committed file "path" with content:`,
+	`git repository "repo" has untracked file "path" with content:`,
+	`git repository "repo" has modified file "path" with content:`,
+	`git repository "repo" is on branch "feature/name"`,
 }
 
 func executeGivenOp(ctx context.Context, dc dockerRunner, containerID string, op givenOp, timeout time.Duration) error {
@@ -432,6 +452,10 @@ func executeGivenOp(ctx context.Context, dc dockerRunner, containerID string, op
 		}
 	case givenOpMakeDir:
 		if err := dc.MakeDir(ctx, containerID, op.path); err != nil {
+			return fmt.Errorf("Given %q: %w", op.stepText, err)
+		}
+	case givenOpGit:
+		if err := executeGitGivenAction(ctx, dc, containerID, op.git, timeout); err != nil {
 			return fmt.Errorf("Given %q: %w", op.stepText, err)
 		}
 	}

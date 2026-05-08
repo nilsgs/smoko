@@ -152,6 +152,41 @@ And I save JSON path "$.name" as $APP_NAME
 And I save JSON path "$.version" as $APP_VERSION
 ```
 
+### Git fixtures
+
+Prefer the built-in Git fixture steps over raw `git init`, `git config`, `git add`, and `git commit` setup commands when a scenario only needs local repository state.
+
+```gherkin
+Given a git repository "repo" exists
+Given git repository "repo" has committed file "README.md" with content:
+  hello
+Given git repository "repo" has untracked file "scratch.txt" with content:
+  draft
+Given git repository "repo" has modified file "README.md" with content:
+  changed
+Given git repository "repo" is on branch "feature/name"
+```
+
+Behavior:
+- Requires `git` on `PATH` in the test image.
+- Repositories are confined to `/smoko-work`; relative repo paths resolve there.
+- New repositories use `main` and an empty initial commit.
+- `committed file` creates the repository if needed and commits only that file.
+- `modified file` requires the file to already be tracked.
+- File paths inside a Git repository are relative to the repository root and must not contain `..`.
+- Use these steps for local repository state only; keep remotes, credentials, submodules, and hosted Git provider behavior explicit in the scenario setup.
+- Keep the CLI behavior under test in the `When` step.
+
+Git assertions:
+
+```gherkin
+Then git repository "repo" is clean
+Then git repository "repo" is dirty
+Then git repository "repo" has branch "feature/name"
+```
+
+Git assertion repository paths expand captured variables.
+
 ## When
 
 Use exactly one `When` step per scenario.
@@ -290,10 +325,10 @@ Assertion paths resolve relative paths under `/smoko-work`. Absolute assertion p
 Use `Given the working directory is "..."` instead of `sh -c 'cd ... && ...'` in the `When` step:
 
 ```gherkin
-# Before — embeds shell logic in the action step, POSIX-only:
+# Before - embeds shell logic in the action step, POSIX-only:
 When I run "sh -c 'cd src/App && mycli bump --major'"
 
-# After — clean Given/When/Then separation:
+# After - clean Given/When/Then separation:
 Given the working directory is "src/App"
 When I run "mycli bump --major"
 ```
@@ -326,7 +361,7 @@ Scenario: CLI writes output to a path it reports
   Then file "$OUTDIR/index.html" contains "<!DOCTYPE html>"
 ```
 
-Don't embed file-existence checks in the `When` shell command just to avoid variable expansion — use `$VAR` directly in `Then` step paths.
+Don't embed file-existence checks in the `When` shell command just to avoid variable expansion - use `$VAR` directly in `Then` step paths.
 
 ### Sequential setup with variable capture
 
@@ -418,11 +453,11 @@ Scenario: CLI respects environment variables
 
 ## Debugging guidance
 
-- If a `Given the working directory is` step fails, the directory does not yet exist in the container — add a `Given the directory "..." exists` step before it.
+- If a `Given the working directory is` step fails, the directory does not yet exist in the container - add a `Given the directory "..." exists` step before it.
 - If a `Given` step fails before `When`, inspect the setup command or path assumptions first.
 - If a setup path fails, verify it stays under `/smoko-work` and does not contain `..`.
 - If a file assertion fails, remember paths are relative to `/smoko-work` unless explicitly absolute; `..` is rejected.
-- If a `Then file "$VAR/..."` path is treated as a literal string (dollar sign visible in error), the variable was not captured — check that `And I save ... as $VAR` immediately follows the `Given I run` that produced the value.
+- If a `Then file "$VAR/..."` path is treated as a literal string (dollar sign visible in error), the variable was not captured - check that `And I save ... as $VAR` immediately follows the `Given I run` that produced the value.
 - If regex assertions fail, verify the step uses `matches pattern`, not just `matches`.
 - If a JSON assertion fails, check whether the source is valid JSON, whether the JSONPath is valid, and whether `equals` matched exactly one node.
 - If shared setup is repeated across scenarios, move it into `Background`.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,6 +24,23 @@ type fakeDocker struct {
 	batchErr           error
 	batchChecks        []docker.FSCheck
 	lastFileExistsPath string
+	execCalls          []execCall
+	execResults        []execResult
+}
+
+type execCall struct {
+	containerID string
+	workdir     string
+	command     string
+	stdin       string
+	timeout     time.Duration
+}
+
+type execResult struct {
+	stdout   string
+	stderr   string
+	exitCode int
+	err      error
 }
 
 func (f *fakeDocker) FileExists(ctx context.Context, containerID, path string) (bool, error) {
@@ -41,6 +59,24 @@ func (f *fakeDocker) ReadFile(ctx context.Context, containerID, path string) (st
 func (f *fakeDocker) BatchFSCheck(ctx context.Context, containerID string, checks []docker.FSCheck) ([]docker.FSResult, error) {
 	f.batchChecks = append([]docker.FSCheck(nil), checks...)
 	return f.batchResults, f.batchErr
+}
+
+func (f *fakeDocker) ExecCommand(ctx context.Context, containerID, workdir, command, stdin string, timeout time.Duration) (string, string, int, error) {
+	f.execCalls = append(f.execCalls, execCall{
+		containerID: containerID,
+		workdir:     workdir,
+		command:     command,
+		stdin:       stdin,
+		timeout:     timeout,
+	})
+
+	if len(f.execResults) == 0 {
+		return "", "", 0, nil
+	}
+
+	result := f.execResults[0]
+	f.execResults = f.execResults[1:]
+	return result.stdout, result.stderr, result.exitCode, result.err
 }
 
 func newWhenResult(stdout, stderr string, exitCode int) *executor.WhenResult {
@@ -559,4 +595,58 @@ func TestFileContainsWithVarExpansion(t *testing.T) {
 	env := []string{"OUTFILE=/smoko-work/result.txt"}
 	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", env)
 	assert.True(t, r.Pass)
+}
+
+func TestGitRepositoryIsDirtyWithVarExpansion(t *testing.T) {
+	fd := &fakeDocker{
+		execResults: []execResult{{stdout: " M README.md\n", exitCode: 0}},
+	}
+	step := parser.Step{Text: `git repository "$REPO" is dirty`}
+	env := []string{"REPO=/smoko-work/repo"}
+
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", env)
+
+	require.True(t, r.Pass)
+	require.Len(t, fd.execCalls, 1)
+	assert.Contains(t, fd.execCalls[0].command, `command -v git`)
+	assert.Contains(t, fd.execCalls[0].command, `git -C '/smoko-work/repo' status --porcelain`)
+	assert.Equal(t, docker.WorkDir(), fd.execCalls[0].workdir)
+}
+
+func TestGitRepositoryCleanFailure(t *testing.T) {
+	fd := &fakeDocker{
+		execResults: []execResult{{stdout: "?? scratch.txt\n", exitCode: 0}},
+	}
+	step := parser.Step{Text: `git repository "repo" is clean`}
+
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", nil)
+
+	assert.False(t, r.Pass)
+	assert.Contains(t, r.Message, "is dirty")
+	assert.Contains(t, r.Message, "?? scratch.txt")
+}
+
+func TestGitRepositoryHasBranch(t *testing.T) {
+	fd := &fakeDocker{
+		execResults: []execResult{{exitCode: 0}},
+	}
+	step := parser.Step{Text: `git repository "repo" has branch "feature/test"`}
+
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", nil)
+
+	require.True(t, r.Pass)
+	require.Len(t, fd.execCalls, 1)
+	assert.Contains(t, fd.execCalls[0].command, `show-ref --verify --quiet 'refs/heads/feature/test'`)
+}
+
+func TestGitRepositoryMissingBranch(t *testing.T) {
+	fd := &fakeDocker{
+		execResults: []execResult{{exitCode: 1}},
+	}
+	step := parser.Step{Text: `git repository "repo" has branch "feature/test"`}
+
+	r := assertions.Evaluate(context.Background(), step, newWhenResult("", "", 0), fd, "cid", nil)
+
+	assert.False(t, r.Pass)
+	assert.Contains(t, r.Message, `does not have branch "feature/test"`)
 }

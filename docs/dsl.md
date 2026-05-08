@@ -49,10 +49,25 @@ Given the working directory is "path/to/dir"
 Given I run "setup command"
 Given an empty working directory
 Given environment variable "NAME" is set to "value"
+Given a git repository "repo" exists
+Given git repository "repo" has committed file "README.md" with content:
+  committed content
+Given git repository "repo" has untracked file "scratch.txt" with content:
+  untracked content
+Given git repository "repo" has modified file "README.md" with content:
+  modified content
+Given git repository "repo" is on branch "feature/name"
 ```
 
 Setup paths are confined to `/smoko-work`. Relative paths resolve under
 `/smoko-work`. Paths containing `..` are rejected.
+
+Git fixture steps create disposable repositories inside `/smoko-work` and
+require `git` on `PATH` in the test image. New repositories use `main` and an
+empty initial commit. `committed file` creates the repo if needed and commits
+only that file. `modified file` requires the file to already be tracked. File
+paths inside a Git repository must be relative to the repository root and must
+not contain `..`.
 
 ## Capturing Variables
 
@@ -138,3 +153,14 @@ absolute path is provided. Paths containing `..` are rejected.
 
 `equals` trims leading and trailing whitespace before comparing. JSON `equals`
 compares parsed JSON values.
+
+Git assertions:
+
+```gherkin
+Then git repository "repo" is clean
+Then git repository "repo" is dirty
+Then git repository "repo" has branch "feature/name"
+```
+
+Git assertion repository paths resolve under `/smoko-work`, are confined there,
+and expand captured variables.

@@ -475,3 +475,79 @@ func TestAbsoluteWorkdirReset(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, docker.WorkDir(), workdir)
 }
+
+func TestGitRepositoryExistsInitializesMainWithInitialCommit(t *testing.T) {
+	t.Parallel()
+
+	fd := &fakeDocker{}
+	steps := []parser.Step{
+		{ResolvedType: parser.StepGiven, Text: `a git repository "repo" exists`},
+	}
+
+	_, _, err := executor.RunGivenSteps(context.Background(), fd, "c1", steps, 5*time.Second, nil)
+	require.NoError(t, err)
+	require.Len(t, fd.execCalls, 1)
+	assert.Contains(t, fd.execCalls[0].command, "command -v git")
+	assert.Contains(t, fd.execCalls[0].command, "git init -b main '/smoko-work/repo'")
+	assert.Contains(t, fd.execCalls[0].command, "git -C '/smoko-work/repo' commit --allow-empty -m initial")
+	assert.Equal(t, docker.WorkDir(), fd.execCalls[0].workdir)
+}
+
+func TestGitCommittedFileWritesAndCommitsOnlyThatFile(t *testing.T) {
+	t.Parallel()
+
+	fd := &fakeDocker{
+		execResults: []execResult{
+			{exitCode: 0}, // ensure repo
+			{exitCode: 1}, // file is not tracked
+			{exitCode: 0}, // git add
+			{exitCode: 1}, // staged diff exists
+			{exitCode: 0}, // git commit
+		},
+	}
+	steps := []parser.Step{
+		{ResolvedType: parser.StepGiven, Text: `git repository "repo" has committed file "README.md" with content:`, Block: "hello"},
+	}
+
+	_, _, err := executor.RunGivenSteps(context.Background(), fd, "c1", steps, 5*time.Second, nil)
+	require.NoError(t, err)
+	require.Len(t, fd.writeFile, 1)
+	assert.Equal(t, "/smoko-work/repo/README.md", fd.writeFile[0].path)
+	assert.Equal(t, "hello", fd.writeFile[0].content)
+	require.Len(t, fd.execCalls, 5)
+	assert.Contains(t, fd.execCalls[4].command, "git -C '/smoko-work/repo' commit -m 'Add README.md' -- 'README.md'")
+}
+
+func TestGitModifiedFileRequiresTrackedFile(t *testing.T) {
+	t.Parallel()
+
+	fd := &fakeDocker{
+		execResults: []execResult{
+			{exitCode: 0}, // existing repo
+			{exitCode: 1}, // file is not tracked
+		},
+	}
+	steps := []parser.Step{
+		{ResolvedType: parser.StepGiven, Text: `git repository "repo" has modified file "README.md" with content:`, Block: "new"},
+	}
+
+	_, _, err := executor.RunGivenSteps(context.Background(), fd, "c1", steps, 5*time.Second, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires tracked file")
+	assert.Empty(t, fd.writeFile)
+}
+
+func TestGitFileRejectsTraversal(t *testing.T) {
+	t.Parallel()
+
+	fd := &fakeDocker{}
+	steps := []parser.Step{
+		{ResolvedType: parser.StepGiven, Text: `git repository "repo" has committed file "../secret.txt" with content:`, Block: "secret"},
+	}
+
+	_, _, err := executor.RunGivenSteps(context.Background(), fd, "c1", steps, 5*time.Second, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "..")
+	assert.Empty(t, fd.execCalls)
+	assert.Empty(t, fd.writeFile)
+}
